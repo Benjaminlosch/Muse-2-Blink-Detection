@@ -1,0 +1,121 @@
+# Default configuration for the Muse 2 blink-controlled prosthetic hand.
+#
+# Every numeric constant that affects detection/classification/safety behavior
+# lives here (per docs/SIGNAL_PIPELINE.md and docs/SAFETY.md), not scattered in code.
+# Values marked "starting hypothesis" are unverified defaults pending real user
+# calibration data and must be tuned per docs/research_review.md and recorded data
+# before this is trusted for physical hand control.
+
+acquisition:
+  # Fallback sample rate if the acquisition backend cannot report one at runtime.
+  # Source: BrainFlow SupportedBoards docs (MUSE_2_BOARD, DEFAULT_PRESET) report
+  # 256 Hz for Muse 2 EEG and 52 Hz for the AUXILIARY_PRESET (accel/gyro).
+  # https://brainflow.readthedocs.io/en/stable/SupportedBoards.html
+  # When using BrainflowEEGSource, the actual rate is queried from
+  # BoardShim.get_sampling_rate(board_id) at runtime and this value is ignored.
+  fallback_sample_rate_hz: 256.0
+  fallback_imu_sample_rate_hz: 52.0
+  eeg_channels: ["AF7", "AF8", "TP9", "TP10"]
+  primary_channels: ["AF7", "AF8"]
+  reference_channels: ["TP9", "TP10"]
+
+dsp:
+  # Starting hypothesis per project brief section 3; MUST be confirmed against
+  # docs/research_review.md and real recorded data before being trusted.
+  highpass_hz: 0.5
+  lowpass_hz: 20.0
+  filter_order: 2          # per-biquad (second-order sections); causal, no filtfilt in production
+  notch_hz: 60.0            # US mains
+  notch_quality_factor: 30.0
+  notch_enabled: true
+  # Adaptive baseline tracker (slow exponential moving average, removed from signal
+  # to reject drift without needing a hard high-pass corner near DC).
+  baseline_tracker_time_constant_s: 4.0
+
+spatial:
+  use_af7_af8_mean: true
+  use_af7_af8_difference: true
+  require_af7_af8_agreement: true
+  # Minimum correlation between AF7 and AF8 transients within a candidate window
+  # for the event to be treated as a genuine bilateral ocular event rather than
+  # single-electrode noise.
+  af7_af8_min_correlation: 0.6
+  # Max allowed amplitude ratio imbalance between AF7 and AF8 (larger -> more
+  # tolerant of natural asymmetry between electrodes).
+  af7_af8_max_amplitude_ratio: 3.0
+  use_reference_channels_for_veto: true
+
+candidate_detection:
+  # Rolling buffer length used for causal peak/prominence detection.
+  window_s: 1.0
+  # Robust-statistics threshold multiplier applied to MAD-based noise floor,
+  # from calibration (see docs/CALIBRATION.md). This is a multiplier on
+  # robust sigma-equivalent (1.4826 * MAD), not a raw microvolt threshold.
+  threshold_mad_multiplier: 4.0
+  min_blink_width_s: 0.06
+  max_blink_width_s: 0.40
+  min_prominence_uv: 20.0   # starting hypothesis, overridden by calibration
+  refractory_after_candidate_s: 0.15
+  # A candidate whose peak is opposite in sign to, and starts within this many
+  # seconds of, the last accepted candidate is flagged as filter rebound (the
+  # causal bandpass filter's own opposite-sign overshoot following a real
+  # blink) and hard-rejected rather than treated as a new blink. See
+  # docs/SIGNAL_PIPELINE.md "Filter rebound rejection" and
+  # docs/research_review.md Paper 4.
+  rebound_guard_s: 0.30
+  # Debounce applied after a candidate flagged as filter rebound is short —
+  # NOT the full refractory_after_candidate_s — specifically so a genuine
+  # fast double blink following close behind isn't masked by the rebound's
+  # own debounce window. See docs/SIGNAL_PIPELINE.md.
+  rebound_refractory_s: 0.02
+
+calibration:
+  rest_trials: 3
+  rest_trial_duration_s: 3.0
+  single_blink_trials: 3
+  double_blink_trials: 3
+  inter_trial_pause_s: 1.5
+  output_path: "config/calibration_active.yaml"
+
+double_blink:
+  min_interval_s: 0.08     # reject same-blink ringing / bounce as a second blink
+  max_interval_s: 0.60     # starting hypothesis; tune with real user data
+  wait_for_second_timeout_s: 0.70
+  refractory_after_double_s: 0.50
+
+confidence:
+  # Gate thresholds on the classifier's [0,1] confidence score.
+  high_confidence_threshold: 0.80
+  medium_confidence_threshold: 0.55
+  # medium and low confidence both resolve to HOLD; medium is kept distinct
+  # for logging/diagnostics only.
+  min_signal_quality: 0.5
+
+motion_veto:
+  enabled: true
+  # Threshold on IMU-derived motion energy above which a blink-like transient
+  # is rejected or has its confidence reduced. Only active if the acquisition
+  # backend provides IMU/accelerometer data (BrainFlow AUXILIARY_PRESET).
+  accel_energy_threshold_g2: 0.05
+  confidence_penalty: 0.5
+
+communication:
+  port: "COM3"              # Windows default guess; override per machine
+  baud_rate: 115200
+  heartbeat_interval_s: 0.5
+  timeout_s: 1.5             # no valid frame within this window -> HOLD
+  command_mapping:
+    double_blink: "TOGGLE_OPEN_CLOSE"   # config-level intent; resolved to OPEN/CLOSE by hand-state tracker
+    single_blink: "NONE"                # reserved for future use; presently ignored
+    uncertain: "HOLD"
+
+safety:
+  startup_state: "HOLD"
+  on_uncertain: "HOLD"
+  on_poor_signal_quality: "HOLD"
+  on_comm_timeout: "HOLD"
+  on_exception: "HOLD"
+
+recording:
+  output_dir: "data/raw"
+  format: "csv"

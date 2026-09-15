@@ -1,0 +1,32 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# PlatformIO
+firmware/esp32/.pio/
+firmware/esp32/.vscode/
+
+# Data (keep folder structure, ignore recordings)
+data/raw/*.csv
+data/processed/*.csv
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# Local calibration/config overrides
+config/calibration_*.yaml
+!config/calibration_example.yaml

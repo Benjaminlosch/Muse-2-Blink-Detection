@@ -1,0 +1,36 @@
+# EXAMPLE ONLY — illustrates the shape of a calibration override produced by
+# `python scripts/calibrate.py`, generated here from a fully-simulated
+# session (--source simulate), not a real user. Do NOT rename this to
+# calibration_active.yaml and use it for physical hand control — run
+# calibrate.py against your own real Muse 2 data instead (see
+# docs/CALIBRATION.md). config/calibration_active.yaml is gitignored
+# precisely because it's machine/user-specific; this example is committed
+# only as a reference for what the output format looks like.
+candidate_detection:
+  min_prominence_uv: 18.8846
+  min_blink_width_s: 0.1119
+  max_blink_width_s: 0.3519
+calibration_stats:
+  baseline_median: 0.9395616479824745
+  baseline_mad: 0.5546182479034871
+  noise_floor_median: 0.9395616479824745
+  noise_floor_mad: 0.5546182479034871
+  normal_blink_peak_median: 1.5689978343222573
+  normal_blink_peak_mad: 0.0
+  n_rest_candidates: 1
+  intentional_blink_peak_median: 75.53834824462123
+  intentional_blink_peak_mad: 0.009874157365572955
+  intentional_duration_median_s: 0.171875
+  intentional_duration_mad_s: 0.0
+  intentional_rise_time_median_s: 0.046875
+  intentional_fall_time_median_s: 0.125
+  n_single_candidates: 3
+  double_blink_spacing_median_s: 0.2578125
+  double_blink_spacing_mad_s: 0.0
+  n_double_pairs: 3
+  n_rest_trials: 3
+  n_single_trials: 3
+  n_double_trials: 3
+double_blink:
+  min_interval_s: 0.08
+  max_interval_s: 0.4578

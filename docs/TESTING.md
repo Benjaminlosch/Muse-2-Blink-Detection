@@ -1,0 +1,114 @@
+# Testing
+
+## PC / Python (`tests/`)
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+148 tests, all running against simulated data and hand-constructed fixtures
+— none require physical hardware. Coverage includes:
+
+| Area | File(s) |
+|---|---|
+| Causal filters (DC/drift rejection, 60Hz notch, streaming = block) | `test_filters.py` |
+| Spatial combination / AF7-AF8 agreement | `test_spatial.py` |
+| Candidate detector (width bounds, rebound rejection, refractory, truncation) | `test_candidate_detector.py` |
+| Adaptive median/MAD threshold | `test_adaptive_threshold.py` |
+| Feature extraction | `test_features.py` |
+| Signal quality (flatline/railed/noise) | `test_signal_quality.py` |
+| Motion veto | `test_motion_veto.py` |
+| Calibration (incl. the ringing/self-check regressions — see CALIBRATION.md) | `test_calibration.py` |
+| Rule-based classifier (every hard gate) | `test_classifier.py` |
+| Double-blink state machine (timing, debounce, refractory) | `test_state_machine.py` |
+| Confidence/safety gate | `test_confidence_gate.py` |
+| Command mapping | `test_command_mapper.py` |
+| Serial protocol + comm health | `test_serial_protocol.py` |
+| Config loading/merging | `test_config.py` |
+| CSV recorder | `test_recorder.py` |
+| Latency profiler | `test_latency.py` |
+| Offline analysis metrics | `test_analysis_metrics.py` |
+| Signal simulator | `test_signal_generator.py` |
+| **Full end-to-end simulation (the most important file)** | `test_end_to_end_simulation.py` |
+
+`test_end_to_end_simulation.py` runs the built-in "one of everything" demo
+scenario (two genuine double blinks plus every artifact type the project
+cares about rejecting) through the *actual* `BlinkPipeline`, and asserts the
+core safety property: exactly the two genuine double blinks produce
+`OPEN`/`CLOSE`, and nothing else — no jaw clench, muscle burst, head motion,
+baseline drift, 60Hz interference, electrode dropout, single-channel
+artifact, oversized transient, random spike, or slow blink — ever produces a
+non-`HOLD` command. This is the test to run first after touching detection or
+classification code.
+
+## ESP32 firmware (`firmware/esp32/`)
+
+### What has been verified in this environment
+
+- **The full firmware compiles** against the real ESP32 toolchain
+  (PlatformIO + `espressif32` platform + `arduino-esp32` framework),
+  installed and verified here: `pio run -e esp32dev` succeeds for both
+  hardware configurations (`MOTOR_MODE_DC_HBRIDGE`, the default, and
+  `MOTOR_MODE_SERVO`).
+- **The embedded DSP recursion is numerically verified against Python**: the
+  exact Direct-Form-II-Transposed biquad recursion used in
+  `firmware/esp32/lib/core/dsp.cpp` was independently re-implemented in
+  Python and cross-checked bit-for-bit (`max abs diff == 0.0`) against
+  `scipy.signal.sosfilt` on the same coefficients before being translated to
+  C++. A golden input/output vector
+  (`firmware/esp32/lib/core/dsp_golden_vector.h`) generated from the
+  production Python `CausalBlinkBandFilter` is compared against the C++ port
+  at every ESP32 boot (`runDspSelfTest()` in `src/diagnostics.cpp`, printed
+  over serial as `DSP_SELF_TEST:PASS`/`FAIL`).
+
+### What has NOT been verified
+
+- **No physical ESP32 hardware** was available — the firmware has never
+  been flashed to or run on a real board. Nothing about GPIO behavior, PWM
+  output, button/limit-switch wiring, or serial timing has been confirmed
+  against real hardware. Follow [SAFETY.md](SAFETY.md)'s bench-test order.
+- **No host C/C++ compiler was available** in this environment (checked:
+  no `gcc`/`g++`/`clang`/`cl.exe` on `PATH`). `firmware/esp32/test/test_native/`
+  contains PlatformIO/Unity unit tests for the hardware-independent logic
+  (`safety_state_machine.h`, `command_parser.h`, `dsp.h`) — confirmed to be
+  syntactically valid PlatformIO test files (the `native` platform and
+  Unity framework both installed successfully via `pio test -e native`),
+  but the actual compile step fails with `'g++' is not recognized...` in
+  this environment. **Run `pio test -e native` on a machine with a C++
+  compiler installed to actually execute them** before trusting that
+  refactor to `lib/core/` hasn't broken anything.
+
+### Running what can be run here
+
+```bash
+cd firmware/esp32
+pio run -e esp32dev          # compiles for the real target; verified working
+pio test -e native           # requires a host compiler; not available here
+```
+
+### Regenerating the embedded filter coefficients
+
+If `config/default_config.yaml`'s `dsp` section changes, or the Muse 2's
+real sampling rate is confirmed to differ from
+`acquisition.fallback_sample_rate_hz` (WAITING FOR HARDWARE VERIFICATION):
+
+```bash
+python scripts/generate_esp32_filter_coeffs.py
+```
+
+This regenerates `firmware/esp32/lib/core/dsp_coeffs.h` directly from the
+same `scipy.signal.butter`/`iirnotch` calls the PC pipeline uses — never
+hand-edit that file. You'll also need to regenerate
+`dsp_golden_vector.h` (see the Python snippet in that file's own header
+comment) so the boot-time self-test stays in sync.
+
+## What is genuinely untested end-to-end
+
+- Real Muse 2 acquisition (`acquisition/brainflow_source.py`) — written
+  against BrainFlow's public API but never run against a physical device.
+- Real PC↔ESP32 serial round-trip — `communication/serial_link.py` is unit
+  tested against a fake transport; the framing has never been exchanged with
+  actual firmware on actual hardware.
+- Anything downstream of either of the above (embedded DSP on real signal,
+  motor response to a real double blink, latency with real BLE transport).
