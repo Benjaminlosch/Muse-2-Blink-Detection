@@ -1,32 +1,27 @@
-# React + TypeScript + Vite
+# BCI Hand Configurator (web app)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Browser-based operator UI for the Muse 2 blink-controlled prosthetic hand
+project. Connects to a Muse 2 (Web Bluetooth) and an ESP32 (Web Serial)
+directly from Chrome or Edge — no install, no backend, nothing uploaded.
 
-Currently, two official plugins are available:
+See the top-level [`../README.md`](../README.md) and
+[`../docs/WEB_APP.md`](../docs/WEB_APP.md) for full documentation. This
+file only covers the commands specific to this `web/` package.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev          # http://localhost:5173
+npm run test          # vitest — includes the Python equivalence test
+npm run typecheck     # tsc -b --noEmit
+npm run build           # production build -> dist/
+npm run preview         # serve the production build locally
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Relevant docs:
+
+- [`../docs/WEB_APP.md`](../docs/WEB_APP.md) — architecture
+- [`../docs/WEB_BLUETOOTH.md`](../docs/WEB_BLUETOOTH.md) — Muse 2 protocol verification
+- [`../docs/WEB_SERIAL.md`](../docs/WEB_SERIAL.md) — ESP32 serial protocol
+- [`../docs/WEB_DSP_EQUIVALENCE.md`](../docs/WEB_DSP_EQUIVALENCE.md) — how `src/core/` is checked against Python
+- [`../docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md) — build/deploy
+- [`../docs/LAB_USER_GUIDE.md`](../docs/LAB_USER_GUIDE.md) — operating this at the lab
