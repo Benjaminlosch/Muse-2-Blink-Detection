@@ -42,6 +42,43 @@ artifact, oversized transient, random spike, or slow blink — ever produces a
 non-`HOLD` command. This is the test to run first after touching detection or
 classification code.
 
+## Web app (`web/`)
+
+```bash
+cd web
+npm install
+npm run test        # vitest — 19 tests
+npm run typecheck   # tsc -b --noEmit
+npm run build         # production build, also run in CI before deploy
+```
+
+19 vitest tests, all running in Node (no browser, no hardware required):
+
+| Area | File(s) |
+|---|---|
+| Causal filter vs. Python golden vector | `core/dsp/filters.test.ts` |
+| **Full pipeline vs. Python golden run (the most important file)** | `core/pipeline.test.ts` |
+| Calibration statistics (ringing exclusion, self-check regressions) | `core/detection/calibration.test.ts` |
+| ESP32 serial protocol encode/decode | `esp32/protocol.test.ts` |
+
+See [WEB_DSP_EQUIVALENCE.md](WEB_DSP_EQUIVALENCE.md) for how
+`pipeline.test.ts` works and the real divergence bug it caught during
+development (a config key-naming mismatch that silently forced every
+double blink to `HOLD`) — this is the test to run first after touching
+anything in `web/src/core/`.
+
+**Also verified live in a real browser**, not just unit tests: using
+Playwright against the Vite dev server, the full demo scenario was run
+through Simulation Mode end-to-end with zero console errors, and the Live
+EEG, Blink Detector, and Double Blink pages were confirmed to show the
+actual blink waveforms, candidate/rejection statistics (including
+`filter_rebound_bounce` rejections), and a `DOUBLE_BLINK_CONFIRMED` event
+at the same timestamp/confidence/command Python produces for the same
+scenario. This was a one-time manual verification during development, not
+an automated CI step — the repository does not currently include a
+Playwright/browser-driven test suite (a reasonable next addition, not yet
+built).
+
 ## ESP32 firmware (`firmware/esp32/`)
 
 ### What has been verified in this environment

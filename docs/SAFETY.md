@@ -32,6 +32,28 @@ checked in `classification/confidence_gate.py`:
 3. Signal quality above `confidence.min_signal_quality`, not flatlined, not railed.
 4. `comm_ok_provider()` reports the ESP32 link healthy.
 
+## Web app (browser configurator)
+
+The web app (`web/`, see [WEB_APP.md](WEB_APP.md)) runs the same
+`confidenceGate.ts` logic (ported and equivalence-tested against Python —
+see [WEB_DSP_EQUIVALENCE.md](WEB_DSP_EQUIVALENCE.md)) inside
+`worker/pipelineWorker.ts`, plus its own additional fail-safe triggers
+specific to a browser environment (project brief section 25):
+
+| Condition | Enforcement |
+|---|---|
+| Muse 2 disconnects mid-session | `MuseClient`'s `gattserverdisconnected` listener fires `onConnectionStateChange("disconnected")`; no more samples reach the worker, so the pipeline simply stops advancing — the last resolved command was already gated normally, and no new non-HOLD command can be produced without new samples |
+| ESP32 disconnects | `Esp32Client`'s connection-state callback resets `esp32OutputArmed` to `false` and `commOk` to `true` (the "not connected" default, not "healthy") — see [WEB_SERIAL.md](WEB_SERIAL.md) |
+| ESP32 heartbeat/serial timeout | `Esp32Client.isHealthy(timeoutMs)`, polled every 250ms by `appEngine.ts` and forwarded to the worker as `commOk` — mirrors `communication/serial_link.py` exactly |
+| Invalid/unrecognized serial frame | `esp32/protocol.ts::decodeLine()` returns `null` for anything unrecognized; only recognized frames update comm health, so garbage input cannot masquerade as a healthy link |
+| Output not explicitly armed | `appEngine.maybeForwardCommandToEsp32()` only sends a command when `esp32OutputArmed === true`, set only by an explicit user action on the ESP32 page, never automatically on connect (project brief section 22) |
+| Page reloads / worker not yet initialized | `pipelineWorker.ts` starts with `pipeline = null` and ignores `"samples"` messages until `"init"` has been received; the store's `latestCommand` defaults to `"HOLD"` |
+
+The same defense-in-depth principle applies here as on the PC/ESP32
+side: the browser's own gate, the ESP32 firmware's independent
+`SafetyStateMachine`, and the explicit output-arming toggle are three
+separate mechanisms, none of which is trusted alone.
+
 Medium confidence is logged (for calibration/tuning) but always resolves to
 `HOLD` — there is no "best guess" fallback anywhere in this system.
 

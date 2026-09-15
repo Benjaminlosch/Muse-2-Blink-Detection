@@ -10,7 +10,44 @@ contact).
 
 **The safe state is always HOLD.** See [docs/SAFETY.md](docs/SAFETY.md).
 
-## What actually works right now
+## BCI Hand Configurator (browser app)
+
+A no-install, browser-based operator UI — connect a Muse 2 and ESP32
+directly from Chrome or Edge via Web Bluetooth/Web Serial, calibrate,
+watch live detection, and control the hand, all client-side (no account,
+no backend, nothing uploaded). See [docs/WEB_APP.md](docs/WEB_APP.md) for
+architecture and [docs/LAB_USER_GUIDE.md](docs/LAB_USER_GUIDE.md) for the
+5-minute operator walkthrough.
+
+```bash
+cd web
+npm install
+npm run dev          # http://localhost:5173 — development
+npm run test          # vitest — includes the Python equivalence test
+npm run build          # production build
+npm run preview        # serve the production build locally
+```
+
+**Deploy**: pushes to `main` auto-deploy to GitHub Pages via
+`.github/workflows/deploy-web.yml` (typecheck + test + build must pass
+first). See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for one-time setup and
+alternatives (Cloudflare Pages / Vercel / Netlify).
+
+**Lab use**: open the deployed URL in Chrome/Edge → Connect Muse 2 →
+Calibrate → (optionally) Connect ESP32 → Arm Output → double-blink to
+control the hand. Full steps: [docs/LAB_USER_GUIDE.md](docs/LAB_USER_GUIDE.md).
+
+The browser app is a direct, verified port of the Python pipeline below —
+not a separate implementation. See
+[docs/WEB_DSP_EQUIVALENCE.md](docs/WEB_DSP_EQUIVALENCE.md) for how
+`web/src/core/` is checked against real Python output (raw samples
+exported from an actual Python run, replayed through the TypeScript
+pipeline, asserting the same commands come out), and
+[docs/WEB_BLUETOOTH.md](docs/WEB_BLUETOOTH.md) /
+[docs/WEB_SERIAL.md](docs/WEB_SERIAL.md) for the verified (not invented)
+Muse 2 / ESP32 protocols.
+
+## What actually works right now (Python reference implementation)
 
 Everything below runs today, with no hardware, via the built-in simulator:
 
@@ -75,8 +112,15 @@ src/bcihand/
   pipeline.py                 BlinkPipeline — the single real-time entry point, used by both live scripts and every test
 firmware/esp32/               ESP32 safety receiver + motor controller (PlatformIO); see docs/ESP32_SETUP.md
 scripts/                      CLI entry points (see below)
-tests/                        147 automated tests, no hardware required
-docs/                         SIGNAL_PIPELINE, CALIBRATION, ESP32_SETUP, MUSE2_SETUP, TESTING, SAFETY, research_review
+tests/                        148 automated tests, no hardware required
+web/                           BCI Hand Configurator (browser app) — see docs/WEB_APP.md
+  src/core/                    Direct port of src/bcihand/, equivalence-tested against it
+  src/muse/, src/esp32/         Web Bluetooth / Web Serial clients
+  src/worker/, src/engine/       Pipeline worker + the singleton that wires everything together
+  src/components/                13-page Betaflight-style UI
+docs/                         SIGNAL_PIPELINE, CALIBRATION, ESP32_SETUP, MUSE2_SETUP, TESTING, SAFETY,
+                                WEB_APP, WEB_BLUETOOTH, WEB_SERIAL, WEB_DSP_EQUIVALENCE, DEPLOYMENT,
+                                LAB_USER_GUIDE, research_review
 data/{raw,processed}/         Recordings (gitignored) and analysis outputs
 ```
 
@@ -130,14 +174,21 @@ ESP32. Full detail: [docs/SAFETY.md](docs/SAFETY.md).
 
 ## Connecting hardware (once available)
 
-- **Muse 2**: [docs/MUSE2_SETUP.md](docs/MUSE2_SETUP.md) — `pip install -e
-  ".[acquisition]"`, then `--source muse2` on any script.
-- **ESP32**: [docs/ESP32_SETUP.md](docs/ESP32_SETUP.md) — build/flash via
-  PlatformIO, serial protocol reference, historical pin configuration.
+Two independent paths to the same hardware, either works:
 
-Neither has been exercised against physical hardware in this environment —
-see [docs/TESTING.md](docs/TESTING.md) for the precise, non-inflated list of
-what has and hasn't been verified.
+- **Python (this repo's reference implementation)**: `pip install -e
+  ".[acquisition]"`, then `--source muse2` on any script for the Muse 2;
+  [docs/ESP32_SETUP.md](docs/ESP32_SETUP.md) for the ESP32 (PlatformIO
+  build/flash, serial protocol, historical pin configuration).
+- **Browser (BCI Hand Configurator)**: no install — Web Bluetooth/Web
+  Serial directly from Chrome/Edge. See
+  [docs/WEB_BLUETOOTH.md](docs/WEB_BLUETOOTH.md) and
+  [docs/WEB_SERIAL.md](docs/WEB_SERIAL.md).
+
+See [docs/MUSE2_SETUP.md](docs/MUSE2_SETUP.md) for the Python-side Muse 2
+setup. Neither path has been exercised against physical hardware in this
+environment — see [docs/TESTING.md](docs/TESTING.md) for the precise,
+non-inflated list of what has and hasn't been verified.
 
 ## Development method
 
