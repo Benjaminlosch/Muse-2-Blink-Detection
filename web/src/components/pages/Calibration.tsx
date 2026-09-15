@@ -143,8 +143,17 @@ export function Calibration() {
   function loadSaved() {
     const saved = loadCalibrationFromStorage();
     if (!saved) return;
+    // Recompute overrides from the saved raw stats with the *current*
+    // deriveConfigOverrides formula, rather than reusing whatever overrides
+    // were frozen in at save time — so a fix to the derivation (e.g. the
+    // double-blink second-pulse ceiling) benefits an already-saved
+    // calibration without needing to redo the trials. Falls back gracefully
+    // to the old single-blink-only formula for a calibration saved before a
+    // given stat field existed (deriveConfigOverrides treats 0/missing as
+    // "no data for that ceiling").
+    const overrides = deriveConfigOverrides(saved.stats);
     setCalibrationStats(saved.stats);
-    setConfig(mergeConfig(config, saved.overrides));
+    setConfig(mergeConfig(config, overrides));
     appEngine.applyCalibration();
     appEngine.applyConfig();
   }

@@ -11,7 +11,7 @@ touches EEG data.
 cd web
 npm install
 npm run dev        # http://localhost:5173
-npm run test        # vitest — 24 tests, no hardware required
+npm run test        # vitest — 27 tests, no hardware required
 npm run typecheck   # tsc -b --noEmit
 npm run build        # production build -> web/dist/
 npm run preview      # serve the production build locally

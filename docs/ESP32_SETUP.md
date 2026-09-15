@@ -134,8 +134,8 @@ No PC, browser, or serial link is needed at runtime. This is the
   `confidence_gate`, `command_mapper`, and `blink_pipeline` (the
   orchestrator, mirroring `pipeline.py` / `web/src/core/pipeline.ts`'s
   `processSample()` stage-for-stage). This is a careful line-by-line
-  translation of the same logic already validated in Python (152 tests)
-  and TypeScript (24 tests, including a full Python-golden-run
+  translation of the same logic already validated in Python (155 tests)
+  and TypeScript (27 tests, including a full Python-golden-run
   equivalence check) — but this specific C++ port has **no automated
   equivalence test of its own** yet (no host C++ compiler was available
   to run one — see [TESTING.md](TESTING.md) "Known gap"). Treat it as

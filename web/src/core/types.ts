@@ -115,6 +115,17 @@ export interface CalibrationStats {
   doubleBlinkSpacingMedianS: number;
   doubleBlinkSpacingMadS: number;
   nDoublePairs: number;
+  // The *actual* classifier-equivalent prominence/duration of each
+  // DOUBLE_BLINK trial's second pulse — directly measured (not guessed
+  // from single-blink amplitude), used as a hard ceiling in
+  // deriveConfigOverrides so calibration can never derive a threshold that
+  // would reject the very double blinks it just verified. 0 means "no
+  // double-blink trial data" (e.g. a calibration saved before this field
+  // existed).
+  doubleBlinkSecondPulseProminenceMedian: number;
+  doubleBlinkSecondPulseProminenceMad: number;
+  doubleBlinkSecondPulseDurationMedianS: number;
+  doubleBlinkSecondPulseDurationMadS: number;
   nRestTrials: number;
   nSingleTrials: number;
   nDoubleTrials: number;
@@ -128,6 +139,8 @@ export function defaultCalibrationStats(): CalibrationStats {
     intentionalDurationMedianS: 0, intentionalDurationMadS: 0,
     intentionalRiseTimeMedianS: 0, intentionalFallTimeMedianS: 0, nSingleCandidates: 0,
     doubleBlinkSpacingMedianS: 0, doubleBlinkSpacingMadS: 0, nDoublePairs: 0,
+    doubleBlinkSecondPulseProminenceMedian: 0, doubleBlinkSecondPulseProminenceMad: 0,
+    doubleBlinkSecondPulseDurationMedianS: 0, doubleBlinkSecondPulseDurationMadS: 0,
     nRestTrials: 0, nSingleTrials: 0, nDoubleTrials: 0,
   };
 }

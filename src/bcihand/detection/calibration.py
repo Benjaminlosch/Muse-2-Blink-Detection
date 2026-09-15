@@ -23,6 +23,7 @@ import yaml
 
 from .adaptive_threshold import MAD_TO_SIGMA
 from .candidate_detector import CandidateDetector, BlinkCandidate
+from .features import extract_features
 
 
 def _median_mad(values: list[float]) -> tuple[float, float]:
@@ -57,6 +58,24 @@ class CalibrationStats:
     double_blink_spacing_mad_s: float = 0.0
     n_double_pairs: int = 0
 
+    # The *actual* classifier-equivalent prominence (extract_features'
+    # peak_prominence, not a raw peak-amplitude proxy) of each DOUBLE_BLINK
+    # trial's second pulse — directly measured, not guessed. Used as a hard
+    # ceiling on the derived min_prominence_uv so calibration can never
+    # produce a threshold that would have rejected the very double blinks it
+    # just verified. 0.0 (the default) means "no double-blink trial data",
+    # e.g. a calibration saved before this field existed — see
+    # derive_config_overrides.
+    double_blink_second_pulse_prominence_median: float = 0.0
+    double_blink_second_pulse_prominence_mad: float = 0.0
+    # Same idea for duration: the second pulse's candidate window is often
+    # shorter than an isolated blink's (it starts already-elevated above
+    # baseline, so the candidate detector's threshold-crossing boundary
+    # falls later relative to the true blink onset) — measured directly so
+    # min_blink_width_s can't reject it either.
+    double_blink_second_pulse_duration_median_s: float = 0.0
+    double_blink_second_pulse_duration_mad_s: float = 0.0
+
     n_rest_trials: int = 0
     n_single_trials: int = 0
     n_double_trials: int = 0
@@ -64,7 +83,9 @@ class CalibrationStats:
     def derive_config_overrides(self, prominence_margin_sigma: float = 1.5,
                                  interval_margin_s: float = 0.15,
                                  min_relative_prominence_spread: float = 0.5,
-                                 min_duration_spread_s: float = 0.02) -> dict:
+                                 min_duration_spread_s: float = 0.02,
+                                 second_pulse_margin_sigma: float = 1.0,
+                                 min_relative_second_pulse_spread: float = 0.3) -> dict:
         """Turn measured stats into a config-override dict compatible with
         config/default_config.yaml's structure (deep-merged as
         config/calibration_active.yaml).
@@ -94,6 +115,15 @@ class CalibrationStats:
         self-check, which replays the calibration trials themselves through
         the full classifier and warns if a derived threshold would reject
         one of its own double-blink second pulses.
+
+        The above is still only a *guess* at how much weaker a second pulse
+        will be, extrapolated from single-blink amplitude. When DOUBLE_BLINK
+        trial data is available, double_blink_second_pulse_prominence_median
+        is the real measured peak_prominence (extract_features, the exact
+        feature the live classifier gates on) of those trials' second
+        pulses — used below as a hard ceiling so the derived threshold can
+        never exceed what was actually measured, i.e. calibration can never
+        reject the very double blinks it just verified.
         """
         prominence_spread = max(
             self.intentional_blink_peak_mad * MAD_TO_SIGMA,
@@ -105,9 +135,41 @@ class CalibrationStats:
             1e-6,
         )
 
+        if self.n_double_pairs > 0 and self.double_blink_second_pulse_prominence_median > 0:
+            second_pulse_spread = max(
+                self.double_blink_second_pulse_prominence_mad * MAD_TO_SIGMA,
+                min_relative_second_pulse_spread * self.double_blink_second_pulse_prominence_median,
+            )
+            # Deliberately NOT re-clamped to the noise-floor lower bound
+            # above: these second pulses were *already* real, width-valid,
+            # non-artifact candidates during calibration (the adaptive
+            # candidate detector's own noise-floor-based threshold already
+            # passed them before classify_candidate's min_prominence_uv gate
+            # ever saw them), so re-imposing that same noise-floor bound
+            # here would just recreate the bug this ceiling exists to fix —
+            # a session with a noisier baseline could derive a
+            # min_prominence_uv *above* what its own verified double blinks
+            # actually measured.
+            second_pulse_ceiling = max(
+                self.double_blink_second_pulse_prominence_median - second_pulse_margin_sigma * second_pulse_spread,
+                1e-6,
+            )
+            min_prominence = min(min_prominence, second_pulse_ceiling)
+
         duration_spread = max(self.intentional_duration_mad_s, min_duration_spread_s)
         min_width = max(self.intentional_duration_median_s - 3 * duration_spread, 0.02)
         max_width = self.intentional_duration_median_s + 4 * duration_spread + 0.1
+
+        if self.n_double_pairs > 0 and self.double_blink_second_pulse_duration_median_s > 0:
+            # Same reasoning as the prominence ceiling above: a fast double
+            # blink's second-pulse candidate window can be genuinely shorter
+            # than an isolated blink's (it starts already-elevated, so the
+            # threshold-crossing "start" falls later) — never derive a
+            # min_blink_width_s above what was actually measured.
+            second_pulse_duration_spread = max(self.double_blink_second_pulse_duration_mad_s, min_duration_spread_s)
+            min_width = min(min_width, max(
+                self.double_blink_second_pulse_duration_median_s - 2 * second_pulse_duration_spread, 0.02,
+            ))
 
         if self.n_double_pairs > 0:
             spacing = self.double_blink_spacing_median_s
@@ -191,6 +253,8 @@ def compute_calibration_stats(segments: list[TrialSegment], fs_hz: float) -> Cal
     intentional_rise_times: list[float] = []
     intentional_fall_times: list[float] = []
     double_spacings: list[float] = []
+    double_second_pulse_prominences: list[float] = []
+    double_second_pulse_durations: list[float] = []
 
     for seg in segments:
         candidates = _find_candidates_in_segment(seg, fs_hz)
@@ -221,6 +285,18 @@ def compute_calibration_stats(segments: list[TrialSegment], fs_hz: float) -> Cal
                 spacing = b.start_time_s - a.end_time_s
                 if spacing > 0:
                     double_spacings.append(spacing)
+                # b is the second (later) pulse — the one riding the first
+                # pulse's still-decaying filter tail. Measure its *actual*
+                # classifier-equivalent prominence (not just peak amplitude)
+                # so derive_config_overrides can use real data, not a guess,
+                # as the ceiling on min_prominence_uv — see that method.
+                b_features = extract_features(
+                    b.frontal_window, b.af7_window, b.af8_window, fs_hz,
+                    baseline_level=stats.noise_floor_median,
+                    time_since_previous_valid_blink_s=spacing if spacing > 0 else 0.0,
+                )
+                double_second_pulse_prominences.append(b_features.peak_prominence)
+                double_second_pulse_durations.append(b.duration_s)
 
     stats.normal_blink_peak_median, stats.normal_blink_peak_mad = _median_mad(normal_peaks)
     stats.n_rest_candidates = len(normal_peaks)
@@ -233,5 +309,12 @@ def compute_calibration_stats(segments: list[TrialSegment], fs_hz: float) -> Cal
 
     stats.double_blink_spacing_median_s, stats.double_blink_spacing_mad_s = _median_mad(double_spacings)
     stats.n_double_pairs = len(double_spacings)
+
+    stats.double_blink_second_pulse_prominence_median, stats.double_blink_second_pulse_prominence_mad = (
+        _median_mad(double_second_pulse_prominences)
+    )
+    stats.double_blink_second_pulse_duration_median_s, stats.double_blink_second_pulse_duration_mad_s = (
+        _median_mad(double_second_pulse_durations)
+    )
 
     return stats

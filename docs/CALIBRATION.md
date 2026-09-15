@@ -118,6 +118,26 @@ calibration trials themselves through the full classifier under the derived
 thresholds and warns if fewer valid blinks come out than the trial protocol
 implies. Do not ignore that warning.
 
+**Real-hardware bug found 2026-09-15** (fixed): the 50%-of-single-blink
+floor above is only a *guess* at how much weaker a second pulse will be —
+it was possible for a calibration session to pass its own wizard (3/3
+single, 3/3 double detected) and still derive a `min_prominence_uv` /
+`min_blink_width_s` that rejected live double blinks of similar amplitude
+afterwards, because nothing tied the derived threshold to what the
+session's own DOUBLE_BLINK trials actually measured for the second pulse.
+Fixed by having `compute_calibration_stats` also measure each DOUBLE_BLINK
+trial's second pulse with the *real* classifier feature
+(`extract_features().peak_prominence`/`duration_s`, not just peak
+amplitude) and having `derive_config_overrides()` use that as a **hard
+ceiling** — deliberately not re-clamped to the noise-floor lower bound,
+since these second pulses were already verified non-artifact candidates
+during calibration. This is why `Load Saved Calibration` in the web app
+recomputes overrides from the saved raw stats with the current formula
+every time, instead of replaying a frozen result — an existing calibration
+benefits from this fix automatically (though the new ceiling only has data
+to work with once you calibrate again, since it needs a real measurement
+that wasn't recorded by older calibration runs).
+
 ## Running calibration
 
 ```bash

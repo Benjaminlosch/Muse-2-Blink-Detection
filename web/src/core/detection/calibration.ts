@@ -12,12 +12,19 @@
  *      blink (it rides on the first pulse's still-decaying filter tail),
  *      and a tight floor derived from a low-variance calibration session
  *      can reject it.
+ *   3. The single-blink-derived floor above is still only a guess. When
+ *      DOUBLE_BLINK trial data exists, deriveConfigOverrides also computes
+ *      a hard ceiling from the *actually measured* second-pulse
+ *      prominence/duration (real hardware bug, 2026-09-15: a calibration
+ *      that passed 3/3 single + 3/3 double still rejected 15/16 live
+ *      candidates afterwards) — see deriveConfigOverrides' own comments.
  */
 import type { CalibrationStats } from "../types";
 import { defaultCalibrationStats } from "../types";
 import type { BciConfig, DeepPartial } from "../config";
 import { MAD_TO_SIGMA, median, medianAbsoluteDeviation } from "./adaptiveThreshold";
 import { CandidateDetector } from "./candidateDetector";
+import { extractFeatures } from "./features";
 import type { BlinkCandidate } from "../types";
 
 function medianMad(values: number[]): [number, number] {
@@ -73,6 +80,8 @@ export function computeCalibrationStats(segments: TrialSegment[], fsHz: number):
   const intentionalRiseTimes: number[] = [];
   const intentionalFallTimes: number[] = [];
   const doubleSpacings: number[] = [];
+  const doubleSecondPulseProminences: number[] = [];
+  const doubleSecondPulseDurations: number[] = [];
 
   for (const seg of segments) {
     const candidates = findCandidatesInSegment(seg, fsHz);
@@ -101,6 +110,17 @@ export function computeCalibrationStats(segments: TrialSegment[], fsHz: number):
         const [a, b] = topTwo.sort((x, y) => x.startTimeS - y.startTimeS);
         const spacing = b.startTimeS - a.endTimeS;
         if (spacing > 0) doubleSpacings.push(spacing);
+        // b is the second (later) pulse — the one riding the first pulse's
+        // still-decaying filter tail. Measure its *actual*
+        // classifier-equivalent prominence/duration (not just peak
+        // amplitude) so deriveConfigOverrides can use real data, not a
+        // guess, as the ceiling on minProminenceUv/minBlinkWidthS.
+        const bFeatures = extractFeatures(
+          b.frontalWindow, b.af7Window, b.af8Window, fsHz,
+          stats.noiseFloorMedian, spacing > 0 ? spacing : 0,
+        );
+        doubleSecondPulseProminences.push(bFeatures.peakProminence);
+        doubleSecondPulseDurations.push(b.durationS);
       }
     }
   }
@@ -117,6 +137,11 @@ export function computeCalibrationStats(segments: TrialSegment[], fsHz: number):
   [stats.doubleBlinkSpacingMedianS, stats.doubleBlinkSpacingMadS] = medianMad(doubleSpacings);
   stats.nDoublePairs = doubleSpacings.length;
 
+  [stats.doubleBlinkSecondPulseProminenceMedian, stats.doubleBlinkSecondPulseProminenceMad] =
+    medianMad(doubleSecondPulseProminences);
+  [stats.doubleBlinkSecondPulseDurationMedianS, stats.doubleBlinkSecondPulseDurationMadS] =
+    medianMad(doubleSecondPulseDurations);
+
   return stats;
 }
 
@@ -126,20 +151,56 @@ export function deriveConfigOverrides(
   intervalMarginS = 0.15,
   minRelativeProminenceSpread = 0.5,
   minDurationSpreadS = 0.02,
+  secondPulseMarginSigma = 1.0,
+  minRelativeSecondPulseSpread = 0.3,
 ): DeepPartial<BciConfig> & { calibrationStats: CalibrationStats } {
   const prominenceSpread = Math.max(
     stats.intentionalBlinkPeakMad * MAD_TO_SIGMA,
     minRelativeProminenceSpread * stats.intentionalBlinkPeakMedian,
   );
-  const minProminence = Math.max(
+  let minProminence = Math.max(
     stats.intentionalBlinkPeakMedian - prominenceMarginSigma * prominenceSpread,
     stats.noiseFloorMedian + 2 * MAD_TO_SIGMA * stats.noiseFloorMad,
     1e-6,
   );
 
+  // The above is still only a *guess* at how much weaker a second pulse
+  // will be, extrapolated from single-blink amplitude. When DOUBLE_BLINK
+  // trial data is available, doubleBlinkSecondPulseProminenceMedian is the
+  // real measured peakProminence (extractFeatures, the exact feature the
+  // live classifier gates on) of those trials' second pulses — used here
+  // as a hard ceiling so the derived threshold can never exceed what was
+  // actually measured. Deliberately NOT re-clamped to the noise-floor lower
+  // bound above: these second pulses were already real, width-valid,
+  // non-artifact candidates during calibration, so re-imposing that bound
+  // here would recreate the exact bug this ceiling exists to fix.
+  if (stats.nDoublePairs > 0 && stats.doubleBlinkSecondPulseProminenceMedian > 0) {
+    const secondPulseSpread = Math.max(
+      stats.doubleBlinkSecondPulseProminenceMad * MAD_TO_SIGMA,
+      minRelativeSecondPulseSpread * stats.doubleBlinkSecondPulseProminenceMedian,
+    );
+    const secondPulseCeiling = Math.max(
+      stats.doubleBlinkSecondPulseProminenceMedian - secondPulseMarginSigma * secondPulseSpread,
+      1e-6,
+    );
+    minProminence = Math.min(minProminence, secondPulseCeiling);
+  }
+
   const durationSpread = Math.max(stats.intentionalDurationMadS, minDurationSpreadS);
-  const minWidth = Math.max(stats.intentionalDurationMedianS - 3 * durationSpread, 0.02);
+  let minWidth = Math.max(stats.intentionalDurationMedianS - 3 * durationSpread, 0.02);
   const maxWidth = stats.intentionalDurationMedianS + 4 * durationSpread + 0.1;
+
+  if (stats.nDoublePairs > 0 && stats.doubleBlinkSecondPulseDurationMedianS > 0) {
+    // Same reasoning as the prominence ceiling: a fast double blink's
+    // second-pulse candidate window can be genuinely shorter than an
+    // isolated blink's — never derive a minBlinkWidthS above what was
+    // actually measured.
+    const secondPulseDurationSpread = Math.max(stats.doubleBlinkSecondPulseDurationMadS, minDurationSpreadS);
+    minWidth = Math.min(
+      minWidth,
+      Math.max(stats.doubleBlinkSecondPulseDurationMedianS - 2 * secondPulseDurationSpread, 0.02),
+    );
+  }
 
   const overrides: DeepPartial<BciConfig> & { calibrationStats: CalibrationStats } = {
     candidateDetection: {
