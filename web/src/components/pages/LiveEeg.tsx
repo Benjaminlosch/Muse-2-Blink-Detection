@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useWindowedResults } from "../../hooks/useWindowedResults";
+import { useAppStore } from "../../state/appStore";
 import { Card } from "../common/Card";
 import { ScrollingLineChart, type ChartSeries } from "../charts/ScrollingLineChart";
 
@@ -10,6 +11,7 @@ export function LiveEeg() {
   const [windowS, setWindowS] = useState(10);
   const [viewMode, setViewMode] = useState<ViewMode>("filtered");
   const [showCombined, setShowCombined] = useState(true);
+  const [chA, chB] = useAppStore((s) => s.config.acquisition.primaryChannels);
 
   const { results, rawSamples } = useWindowedResults(windowS);
   const timestamps = results.map((r) => r.timestampS);
@@ -26,16 +28,16 @@ export function LiveEeg() {
   const channelSeries: ChartSeries[] = [];
   if (viewMode === "raw" || viewMode === "both") {
     channelSeries.push(
-      { label: "AF7 (raw)", color: "#4fd1c5", values: rawAf7, width: 1 },
-      { label: "AF8 (raw)", color: "#f5a524", values: rawAf8, width: 1 },
-      { label: "TP9 (raw)", color: "#7d8598", values: rawTp9, width: 1, dash: [4, 3] },
-      { label: "TP10 (raw)", color: "#5b6478", values: rawTp10, width: 1, dash: [4, 3] },
+      { label: `AF7 (raw)${chA === "AF7" ? " ★ detecting" : ""}`, color: "#4fd1c5", values: rawAf7, width: 1 },
+      { label: `AF8 (raw)${chB === "AF8" ? " ★ detecting" : ""}`, color: "#f5a524", values: rawAf8, width: 1 },
+      { label: `TP9 (raw)${chA === "TP9" ? " ★ detecting" : ""}`, color: "#7d8598", values: rawTp9, width: 1, dash: [4, 3] },
+      { label: `TP10 (raw)${chB === "TP10" ? " ★ detecting" : ""}`, color: "#5b6478", values: rawTp10, width: 1, dash: [4, 3] },
     );
   }
   if (viewMode === "filtered" || viewMode === "both") {
     channelSeries.push(
-      { label: "AF7 (filtered)", color: "#2dd4bf", values: filteredAf7, width: 2 },
-      { label: "AF8 (filtered)", color: "#f97066", values: filteredAf8, width: 2 },
+      { label: `${chA} (filtered)`, color: "#2dd4bf", values: filteredAf7, width: 2 },
+      { label: `${chB} (filtered)`, color: "#f97066", values: filteredAf8, width: 2 },
     );
   }
 
@@ -69,7 +71,7 @@ export function LiveEeg() {
           </div>
           <label className="flex items-center gap-2 text-xs text-[var(--text-dim)]">
             <input type="checkbox" checked={showCombined} onChange={(e) => setShowCombined(e.target.checked)} />
-            Show frontal_mean / frontal_difference
+            Show combined detection signal
           </label>
         </div>
       </Card>
@@ -83,13 +85,13 @@ export function LiveEeg() {
       </Card>
 
       {showCombined && (
-        <Card title="Combined frontal signal">
+        <Card title="Combined detection signal">
           {results.length > 0 ? (
             <ScrollingLineChart
               timestamps={timestamps}
               series={[
-                { label: "frontal_mean = (AF7+AF8)/2", color: "#c084fc", values: frontalMean, width: 2 },
-                { label: "frontal_difference = AF7-AF8", color: "#5b6478", values: frontalDiff, width: 1, dash: [4, 3] },
+                { label: `frontal_mean = (${chA}+${chB})/2`, color: "#c084fc", values: frontalMean, width: 2 },
+                { label: `frontal_difference = ${chA}-${chB}`, color: "#5b6478", values: frontalDiff, width: 1, dash: [4, 3] },
               ]}
               height={180}
               yLabel="µV"

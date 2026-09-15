@@ -11,6 +11,46 @@ genuine blinks for some users, or false-triggers constantly for others. See
 `config/default_config.yaml`'s `candidate_detection.min_prominence_uv` —
 marked "starting hypothesis, overridden by calibration."
 
+## Channel selection
+
+Before calibrating thresholds, pick *which two electrodes* detection runs
+on — `acquisition.primary_channels` (Python) /
+`acquisition.primaryChannels` (web, `config.acquisition.primaryChannels`).
+This defaults to **AF7/AF8** (forehead), the anatomically conventional
+bilateral-ocular pair, and is what the simulator and every automated
+equivalence test (`test_end_to_end_simulation.py`,
+`core/pipeline.test.ts`'s golden-run check) are built against — the
+simulator always writes the full simulated blink pulse to AF7/AF8 and only
+a weak volume-conducted remnant to TP9/TP10, so don't change this default
+in `config/default_config.yaml` / `config.ts`, only override it for a real
+session.
+
+**On real hardware this is only a starting hypothesis, not a fact.** Muse
+2's dry forehead electrodes (AF7/AF8) often make worse skin contact than
+its spring-clip ear electrodes (TP9/TP10) — contact quality, not
+physiology, usually decides which pair actually looks clean on a given
+head. Verified directly in this project (2026-09-15): a live calibration
+run with the default AF7/AF8 pair only detected 1/3 double blinks, while
+the raw TP9 trace on the same run's Live EEG page showed both double-blink
+events clearly. **Before calibrating, open Live EEG, watch a few of your
+own blinks on the raw AF7/AF8/TP9/TP10 traces, and pick whichever pair is
+cleanest** — the web app's Calibration page has an AF7/AF8 vs TP9/TP10
+toggle right above **Start Calibration** for exactly this (it calls
+`appEngine.applyConfig()` immediately, so switch it before running trials,
+not after). On the Python side, set it in `config/calibration_active.yaml`:
+
+```yaml
+acquisition:
+  primary_channels: ["TP9", "TP10"]
+```
+
+This is read by `pipeline.py`'s `_channel_value()` /
+`pipeline.ts`'s `channelValue()` — the only two places that know which
+physical electrode is actually being fed into the (otherwise
+channel-name-agnostic) filter → spatial → candidate → feature →
+classifier chain. The exported ESP32 config (**Export ESP32 Config**, see
+below) bakes in whatever pair was selected on the web app at the time.
+
 ## The honest limitation, stated up front
 
 Physiologically, **a deliberate single blink and a spontaneous single blink

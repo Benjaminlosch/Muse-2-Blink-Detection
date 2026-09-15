@@ -16,6 +16,21 @@ acquisition:
   fallback_sample_rate_hz: 256.0
   fallback_imu_sample_rate_hz: 52.0
   eeg_channels: ["AF7", "AF8", "TP9", "TP10"]
+  # The two channels actually fed into detection (see pipeline.py's
+  # _channel_value). AF7/AF8 (forehead) are the anatomically conventional
+  # bilateral-ocular pair and are what simulation/demo data and the shipped
+  # equivalence tests are generated against (see simulation/signal_generator.py
+  # — AF7/AF8 carry the full simulated blink pulse, TP9/TP10 only a weak
+  # volume-conducted remnant, so this default must stay AF7/AF8 or the demo
+  # scenario and test_end_to_end_simulation.py stop detecting anything).
+  #
+  # On REAL hardware this is still just a starting hypothesis: Muse 2's dry
+  # forehead electrodes often make worse skin contact than its spring-clip
+  # TP9/TP10 ear electrodes. Check your own Live EEG page and, if TP9/TP10
+  # visibly show cleaner blinks than AF7/AF8 on your head, override this in
+  # config/calibration_active.yaml (e.g. `acquisition: {primary_channels:
+  # ["TP9", "TP10"]}`) rather than editing this shipped default — see
+  # docs/CALIBRATION.md "Channel selection."
   primary_channels: ["AF7", "AF8"]
   reference_channels: ["TP9", "TP10"]
 

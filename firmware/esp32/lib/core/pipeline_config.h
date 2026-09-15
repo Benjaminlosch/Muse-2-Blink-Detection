@@ -12,9 +12,23 @@
 
 namespace bcihand {
 
+// Which physical Muse 2 electrode a "channel A"/"channel B" slot reads from
+// — see PipelineConfig::primaryChannelA/B and Sample in blink_pipeline.h.
+// Mirrors pipeline.py's _channel_value / pipeline.ts's channelValue.
+enum class ChannelId { kAf7, kAf8, kTp9, kTp10 };
+
 struct PipelineConfig {
   // acquisition
   double fsHz = 256.0;
+  // Which two raw channels feed detection. AF7/AF8 (forehead) is the
+  // anatomically conventional bilateral-ocular pair, but Muse 2's dry
+  // forehead electrodes often make worse skin contact than the ear-clip
+  // TP9/TP10 electrodes — pick whichever pair showed clean blinks on the
+  // web app's Live EEG page during calibration (see docs/CALIBRATION.md
+  // "Channel selection"). The web app's Export ESP32 Config bakes in
+  // whatever was selected there.
+  ChannelId primaryChannelA = ChannelId::kAf7;
+  ChannelId primaryChannelB = ChannelId::kAf8;
 
   // dsp — baseline tracker only (bandpass/notch coefficients are fixed at
   // compile time in dsp_coeffs.h; see docs/TESTING.md for how to

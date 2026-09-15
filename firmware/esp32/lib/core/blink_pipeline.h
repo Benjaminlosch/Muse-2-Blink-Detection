@@ -34,6 +34,20 @@ struct Sample {
   double accelX = 0, accelY = 0, accelZ = 0;
 };
 
+// Reads one of Sample's four raw EEG fields by ChannelId — the indirection
+// that lets PipelineConfig::primaryChannelA/B pick which two physical
+// electrodes feed detection. Port of pipeline.py's _channel_value /
+// pipeline.ts's channelValue.
+inline double channelValue(const Sample& sample, ChannelId channel) {
+  switch (channel) {
+    case ChannelId::kAf7: return sample.af7;
+    case ChannelId::kAf8: return sample.af8;
+    case ChannelId::kTp9: return sample.tp9;
+    case ChannelId::kTp10: return sample.tp10;
+  }
+  return sample.af7;
+}
+
 struct PipelineStepResult {
   double timestampS;
   double filteredAf7;

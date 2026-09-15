@@ -29,12 +29,14 @@ BlinkPipeline::BlinkPipeline(const PipelineConfig& config, bool (*commOkProvider
 }
 
 PipelineStepResult BlinkPipeline::processSample(const Sample& sample) {
-  double filteredAf7 = filterAf7_.processSample(sample.af7);
-  double filteredAf8 = filterAf8_.processSample(sample.af8);
+  double rawA = channelValue(sample, config_.primaryChannelA);
+  double rawB = channelValue(sample, config_.primaryChannelB);
+  double filteredAf7 = filterAf7_.processSample(rawA);
+  double filteredAf8 = filterAf8_.processSample(rawB);
   double frontal = frontalMean(filteredAf7, filteredAf8);
 
-  SignalQualityStatus sqAf7 = sqMonitorAf7_.update(sample.af7);
-  SignalQualityStatus sqAf8 = sqMonitorAf8_.update(sample.af8);
+  SignalQualityStatus sqAf7 = sqMonitorAf7_.update(rawA);
+  SignalQualityStatus sqAf8 = sqMonitorAf8_.update(rawB);
   SignalQualityStatus signalQuality;
   signalQuality.quality = std::min(sqAf7.quality, sqAf8.quality);
   signalQuality.flatline = sqAf7.flatline || sqAf8.flatline;

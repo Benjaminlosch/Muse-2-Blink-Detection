@@ -7,7 +7,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-148 tests, all running against simulated data and hand-constructed fixtures
+152 tests, all running against simulated data and hand-constructed fixtures
 — none require physical hardware. Coverage includes:
 
 | Area | File(s) |
@@ -24,6 +24,7 @@ pytest
 | Double-blink state machine (timing, debounce, refractory) | `test_state_machine.py` |
 | Confidence/safety gate | `test_confidence_gate.py` |
 | Command mapping | `test_command_mapper.py` |
+| Detection channel selection (`acquisition.primary_channels`) | `test_pipeline_channel_selection.py` |
 | Serial protocol + comm health | `test_serial_protocol.py` |
 | Config loading/merging | `test_config.py` |
 | CSV recorder | `test_recorder.py` |
@@ -47,12 +48,12 @@ classification code.
 ```bash
 cd web
 npm install
-npm run test        # vitest — 19 tests
+npm run test        # vitest — 24 tests
 npm run typecheck   # tsc -b --noEmit
 npm run build         # production build, also run in CI before deploy
 ```
 
-19 vitest tests, all running in Node (no browser, no hardware required):
+24 vitest tests, all running in Node (no browser, no hardware required):
 
 | Area | File(s) |
 |---|---|
@@ -60,6 +61,7 @@ npm run build         # production build, also run in CI before deploy
 | **Full pipeline vs. Python golden run (the most important file)** | `core/pipeline.test.ts` |
 | Calibration statistics (ringing exclusion, self-check regressions) | `core/detection/calibration.test.ts` |
 | ESP32 serial protocol encode/decode | `esp32/protocol.test.ts` |
+| Detection channel selection (`acquisition.primaryChannels`) | `pipelineChannelSelection.test.ts` |
 
 See [WEB_DSP_EQUIVALENCE.md](WEB_DSP_EQUIVALENCE.md) for how
 `pipeline.test.ts` works and the real divergence bug it caught during

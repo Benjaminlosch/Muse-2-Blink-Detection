@@ -46,6 +46,22 @@ export interface PipelineStepResult {
 
 const nowS = (): number => performance.now() / 1000;
 
+const VALID_CHANNEL_NAMES = new Set(["af7", "af8", "tp9", "tp10"]);
+
+/** Reads one of Sample's four raw EEG fields by name (case-insensitive) —
+ * the indirection that lets acquisition.primaryChannels pick which two
+ * physical electrodes feed detection, per-user, without touching any
+ * downstream DSP/detection/classification code (those only ever see
+ * "channel A" / "channel B", never a hardcoded electrode). Port of
+ * pipeline.py's _channel_value. */
+export function channelValue(sample: Sample, channelName: string): number {
+  const key = channelName.trim().toLowerCase();
+  if (!VALID_CHANNEL_NAMES.has(key)) {
+    throw new Error(`Unknown channel '${channelName}'; must be one of af7, af8, tp9, tp10`);
+  }
+  return sample[key as "af7" | "af8" | "tp9" | "tp10"];
+}
+
 export class BlinkPipeline {
   readonly fsHz: number;
   private readonly config: BciConfig;
@@ -62,12 +78,28 @@ export class BlinkPipeline {
   private calibrationStats: CalibrationStats;
   private lastValidBlinkTime: number | null = null;
   readonly latency = new LatencyProfiler();
+  private readonly channelA: string;
+  private readonly channelB: string;
 
   constructor(config: BciConfig, fsHz: number, commOkProvider?: () => boolean, calibrationStats?: CalibrationStats) {
     this.config = config;
     this.fsHz = fsHz;
     this.commOkProvider = commOkProvider ?? (() => true);
     this.calibrationStats = calibrationStats ?? defaultCalibrationStats();
+
+    // Which two raw channels feed detection — see channelValue() above and
+    // docs/CALIBRATION.md "Channel selection". Defaults to AF7/AF8, but is a
+    // per-user/per-headset choice, not a fixed physiological fact.
+    const primary = config.acquisition.primaryChannels;
+    if (primary.length !== 2) {
+      throw new Error(`acquisition.primaryChannels must have exactly 2 entries, got ${JSON.stringify(primary)}`);
+    }
+    for (const name of primary) {
+      if (!VALID_CHANNEL_NAMES.has(name.trim().toLowerCase())) {
+        throw new Error(`Unknown channel '${name}' in acquisition.primaryChannels; must be one of af7, af8, tp9, tp10`);
+      }
+    }
+    [this.channelA, this.channelB] = primary;
 
     const dsp = config.dsp;
     this.filterAf7 = new CausalBlinkBandFilter(fsHz, dsp.baselineTrackerTimeConstantS, dsp.notchEnabled);
@@ -104,14 +136,16 @@ export class BlinkPipeline {
   processSample(sample: Sample): PipelineStepResult {
     const tIngest = nowS();
 
-    const filteredAf7 = this.filterAf7.processSample(sample.af7);
-    const filteredAf8 = this.filterAf8.processSample(sample.af8);
+    const rawA = channelValue(sample, this.channelA);
+    const rawB = channelValue(sample, this.channelB);
+    const filteredAf7 = this.filterAf7.processSample(rawA);
+    const filteredAf8 = this.filterAf8.processSample(rawB);
     const frontal = frontalMean(filteredAf7, filteredAf8);
     const tFiltered = nowS();
     this.latency.record("filtering", tFiltered - tIngest);
 
-    const sqAf7 = this.sqMonitorAf7.update(sample.af7);
-    const sqAf8 = this.sqMonitorAf8.update(sample.af8);
+    const sqAf7 = this.sqMonitorAf7.update(rawA);
+    const sqAf8 = this.sqMonitorAf8.update(rawB);
     const signalQuality: SignalQualityStatus = {
       quality: Math.min(sqAf7.quality, sqAf8.quality),
       flatline: sqAf7.flatline || sqAf8.flatline,

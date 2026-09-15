@@ -45,6 +45,21 @@ class PipelineStepResult:
     gate_decision: GateDecision | None = None
 
 
+_VALID_CHANNEL_NAMES = ("af7", "af8", "tp9", "tp10")
+
+
+def _channel_value(sample: Sample, channel_name: str) -> float:
+    """Reads one of Sample's four raw EEG fields by name (case-insensitive:
+    "AF7"/"af7" etc.) — the indirection that lets acquisition.primary_channels
+    pick which two physical electrodes feed detection, per-user, without
+    touching any downstream DSP/detection/classification code (those only
+    ever see "channel A" / "channel B", never a hardcoded electrode)."""
+    key = channel_name.strip().lower()
+    if key not in _VALID_CHANNEL_NAMES:
+        raise ValueError(f"Unknown channel '{channel_name}'; must be one of {_VALID_CHANNEL_NAMES}")
+    return getattr(sample, key)
+
+
 class BlinkPipeline:
     def __init__(self, config: ConfigNode, fs_hz: float, comm_ok_provider=None):
         self.config = config
@@ -53,6 +68,22 @@ class BlinkPipeline:
         # defaults to "always healthy" for offline/simulated runs where no
         # ESP32 link exists.
         self.comm_ok_provider = comm_ok_provider or (lambda: True)
+
+        # Which two raw channels feed detection. Defaults to AF7/AF8 (the
+        # anatomically conventional bilateral-ocular pair) but is entirely a
+        # per-user/per-headset calibration choice, not a fixed physiological
+        # fact: on real Muse 2 hardware, forehead (AF7/AF8) dry-electrode
+        # contact is often worse than the ear-clip TP9/TP10 contact, and a
+        # user should pick whichever pair actually shows clean blinks on
+        # their own Live EEG view — see docs/CALIBRATION.md "Channel
+        # selection."
+        primary = list(config.acquisition.get("primary_channels", ["AF7", "AF8"]))
+        if len(primary) != 2:
+            raise ValueError(f"acquisition.primary_channels must have exactly 2 entries, got {primary!r}")
+        for name in primary:
+            if name.strip().lower() not in _VALID_CHANNEL_NAMES:
+                raise ValueError(f"Unknown channel '{name}' in acquisition.primary_channels; must be one of {_VALID_CHANNEL_NAMES}")
+        self._channel_a, self._channel_b = primary[0], primary[1]
 
         dsp_cfg = config.dsp
         self.filter_af7 = CausalBlinkBandFilter(
@@ -107,14 +138,16 @@ class BlinkPipeline:
     def process_sample(self, sample: Sample) -> PipelineStepResult:
         t_ingest = time.perf_counter()
 
-        filtered_af7 = self.filter_af7.process_sample(sample.af7)
-        filtered_af8 = self.filter_af8.process_sample(sample.af8)
+        raw_a = _channel_value(sample, self._channel_a)
+        raw_b = _channel_value(sample, self._channel_b)
+        filtered_af7 = self.filter_af7.process_sample(raw_a)
+        filtered_af8 = self.filter_af8.process_sample(raw_b)
         frontal = frontal_mean(filtered_af7, filtered_af8)
         t_filtered = time.perf_counter()
         self.latency.record("filtering", t_filtered - t_ingest)
 
-        sq_af7 = self.sq_monitor_af7.update(sample.af7)
-        sq_af8 = self.sq_monitor_af8.update(sample.af8)
+        sq_af7 = self.sq_monitor_af7.update(raw_a)
+        sq_af8 = self.sq_monitor_af8.update(raw_b)
         combined_quality = min(sq_af7.quality, sq_af8.quality)
         combined_flatline = sq_af7.flatline or sq_af8.flatline
         combined_railed = sq_af7.railed or sq_af8.railed

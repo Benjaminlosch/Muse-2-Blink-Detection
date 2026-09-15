@@ -3,6 +3,7 @@ import { appEngine } from "../../engine/appEngine";
 import { CausalBlinkBandFilter } from "../../core/dsp/filters";
 import { computeCalibrationStats, deriveConfigOverrides, type TrialSegment } from "../../core/detection/calibration";
 import { mergeConfig } from "../../core/config";
+import { channelValue } from "../../core/pipeline";
 import type { CalibrationStats } from "../../core/types";
 import { useAppStore } from "../../state/appStore";
 import { Card } from "../common/Card";
@@ -73,14 +74,15 @@ export function Calibration() {
     const samples = useAppStore.getState().recentRawSamples.filter((s) => s.timestampS >= startT && s.timestampS <= endT);
 
     if (samples.length > 4) {
+      const [chA, chB] = config.acquisition.primaryChannels;
       const af7Filter = new CausalBlinkBandFilter(fsHz, config.dsp.baselineTrackerTimeConstantS, config.dsp.notchEnabled);
       const af8Filter = new CausalBlinkBandFilter(fsHz, config.dsp.baselineTrackerTimeConstantS, config.dsp.notchEnabled);
       const af7 = new Float64Array(samples.length);
       const af8 = new Float64Array(samples.length);
       const frontal = new Float64Array(samples.length);
       samples.forEach((s, i) => {
-        af7[i] = af7Filter.processSample(s.af7);
-        af8[i] = af8Filter.processSample(s.af8);
+        af7[i] = af7Filter.processSample(channelValue(s, chA));
+        af8[i] = af8Filter.processSample(channelValue(s, chB));
         frontal[i] = (af7[i] + af8[i]) / 2;
       });
       trialsRef.current.push({ label: step.label, frontal, af7, af8 });
@@ -156,8 +158,39 @@ export function Calibration() {
 
   const acquiring = useAppStore((s) => s.museConnState === "connected" || s.mode === "simulate");
 
+  const primaryChannels = config.acquisition.primaryChannels;
+  function setPrimaryChannels(a: string, b: string) {
+    setConfig(mergeConfig(config, { acquisition: { primaryChannels: [a, b] } }));
+    appEngine.applyConfig();
+  }
+
   return (
     <div className="flex flex-col gap-4">
+      {phase === "idle" && (
+        <Card title="Detection channels">
+          <p className="mb-3 text-xs text-[var(--text-dim)]">
+            Which two raw electrodes feed blink detection. AF7/AF8 (forehead) is the conventional choice, but Muse
+            2's dry forehead sensors often make worse skin contact than the TP9/TP10 ear clips — check the Live EEG
+            page and pick whichever pair actually shows clean, low-noise blink deflections on your own head before
+            calibrating. See docs/CALIBRATION.md "Channel selection."
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant={primaryChannels[0] === "AF7" ? "primary" : undefined}
+              onClick={() => setPrimaryChannels("AF7", "AF8")}
+            >
+              AF7 / AF8 (forehead)
+            </Button>
+            <Button
+              variant={primaryChannels[0] === "TP9" ? "primary" : undefined}
+              onClick={() => setPrimaryChannels("TP9", "TP10")}
+            >
+              TP9 / TP10 (ear clips)
+            </Button>
+          </div>
+        </Card>
+      )}
+
       <Card title="Guided calibration">
         <p className="mb-3 text-xs text-[var(--text-dim)]">
           Runs REST → SINGLE BLINK → DOUBLE BLINK trials and derives robust (median/MAD) thresholds from your own

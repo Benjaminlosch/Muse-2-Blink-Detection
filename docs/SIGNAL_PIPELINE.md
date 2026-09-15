@@ -7,6 +7,14 @@ function every automated test in `tests/test_end_to_end_simulation.py` calls,
 and the exact same function `scripts/run_pipeline.py` calls per sample,
 whether the source is the simulator or (once verified) a real Muse 2.
 
+Everywhere below says "AF7/AF8" because that's the default, but the two
+channels actually fed into this chain are a config choice
+(`acquisition.primary_channels`, read once via `pipeline.py`'s
+`_channel_value()`) — see [CALIBRATION.md](CALIBRATION.md) "Channel
+selection." Every stage from the per-channel filter onward is genuinely
+channel-name-agnostic; it operates on whichever two raw signals were
+selected.
+
 ```mermaid
 flowchart TD
     S[Sample: AF7, AF8, TP9, TP10, accel] --> F1[Per-channel causal filter\ndsp/filters.py]

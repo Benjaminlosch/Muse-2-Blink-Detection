@@ -53,7 +53,7 @@ Everything below runs today, with no hardware, via the built-in simulator:
 
 ```bash
 pip install -e ".[dev]"
-pytest                                          # 148 tests, all passing
+pytest                                          # 152 tests, all passing
 python scripts/run_pipeline.py --source simulate    # full pipeline, prints OPEN/CLOSE/HOLD events
 python scripts/visualize.py --scenario demo         # debug plot: raw/filtered signal, threshold, candidates, confidence, command timeline
 python scripts/offline_analysis.py --scenario demo  # precision/recall/F1/false-activations-per-minute/latency report
@@ -123,7 +123,7 @@ src/bcihand/
   pipeline.py                 BlinkPipeline — the single real-time entry point, used by both live scripts and every test
 firmware/esp32/               ESP32 safety receiver + motor controller (PlatformIO); see docs/ESP32_SETUP.md
 scripts/                      CLI entry points (see below)
-tests/                        148 automated tests, no hardware required
+tests/                        152 automated tests, no hardware required
 web/                           BCI Hand Configurator (browser app) — see docs/WEB_APP.md
   src/core/                    Direct port of src/bcihand/, equivalence-tested against it
   src/muse/, src/esp32/         Web Bluetooth / Web Serial clients
