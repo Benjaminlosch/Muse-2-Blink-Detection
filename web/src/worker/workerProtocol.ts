@@ -47,6 +47,11 @@ export type MainToWorkerMessage =
 export interface WorkerResultsMessage {
   type: "results";
   results: PipelineStepResult[];
+  /** The raw (pre-filter) samples that produced `results`, same length and
+   * order — kept separate from PipelineStepResult (the Python-equivalence-
+   * verified core type, see core/pipeline.test.ts) purely for the Live EEG
+   * page's raw/filtered toggle. */
+  rawSamples: Sample[];
   latencySummary: Record<string, { n: number; meanMs: number; medianMs: number; p95Ms: number; maxMs: number }>;
 }
 

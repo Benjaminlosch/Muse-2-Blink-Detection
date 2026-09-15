@@ -11,13 +11,17 @@
 import { create } from "zustand";
 import type { BciConfig } from "../core/config";
 import { defaultConfig } from "../core/config";
-import type { CalibrationStats, Command, PipelineStepResult } from "../core/types";
+import type { CalibrationStats, Command, PipelineStepResult, Sample } from "../core/types";
 import { defaultCalibrationStats } from "../core/types";
 import type { RecordRow } from "./recording";
 
 export type AcquisitionMode = "simulate" | "live" | "replay";
 export type MuseConnState = "disconnected" | "connecting" | "connected";
 export type Esp32ConnState = "disconnected" | "connecting" | "connected";
+
+export type PageId =
+  | "dashboard" | "liveEeg" | "filters" | "blinkDetector" | "doubleBlink" | "artifactRejection"
+  | "calibration" | "commands" | "esp32" | "recorder" | "diagnostics" | "settings" | "about";
 
 export interface LatencyStatsUi {
   n: number;
@@ -28,6 +32,9 @@ export interface LatencyStatsUi {
 }
 
 export interface AppState {
+  page: PageId;
+  setPage: (page: PageId) => void;
+
   mode: AcquisitionMode;
   fsHz: number;
 
@@ -46,9 +53,11 @@ export interface AppState {
   config: BciConfig;
   calibrationStats: CalibrationStats;
 
-  /** Bounded ring buffer of recent results, newest last. Charts/pages
-   * slice the tail they need (e.g. last N seconds). */
+  /** Bounded ring buffers of recent results and their matching raw
+   * samples, newest last, same indices. Charts/pages slice the tail they
+   * need (e.g. last N seconds). */
   recentResults: PipelineStepResult[];
+  recentRawSamples: Sample[];
   maxRecentResults: number;
 
   latestCommand: Command;
@@ -72,7 +81,7 @@ export interface AppState {
   setEsp32Error: (message: string | null) => void;
   setConfig: (config: BciConfig) => void;
   setCalibrationStats: (stats: CalibrationStats) => void;
-  pushResults: (results: PipelineStepResult[]) => void;
+  pushResults: (results: PipelineStepResult[], rawSamples: Sample[]) => void;
   setLatencySummary: (summary: Record<string, LatencyStatsUi>) => void;
   startRecording: () => void;
   stopRecording: () => void;
@@ -85,6 +94,9 @@ export interface AppState {
 const MAX_RECENT_RESULTS = 20 * 256; // ~20s at 256Hz, generous upper display window
 
 export const useAppStore = create<AppState>((set, get) => ({
+  page: "dashboard",
+  setPage: (page) => set({ page }),
+
   mode: "simulate",
   fsHz: 256,
 
@@ -104,6 +116,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   calibrationStats: defaultCalibrationStats(),
 
   recentResults: [],
+  recentRawSamples: [],
   maxRecentResults: MAX_RECENT_RESULTS,
 
   latestCommand: "HOLD",
@@ -129,35 +142,49 @@ export const useAppStore = create<AppState>((set, get) => ({
   setConfig: (config) => set({ config }),
   setCalibrationStats: (calibrationStats) => set({ calibrationStats }),
 
-  pushResults: (results) => {
+  pushResults: (results, rawSamples) => {
     if (results.length === 0) return;
     const last = results[results.length - 1];
     const lastWithEvent = [...results].reverse().find((r) => r.stateEvent !== null);
 
     set((state) => {
-      const combined = state.recentResults.length + results.length > state.maxRecentResults
+      const combinedResults = state.recentResults.length + results.length > state.maxRecentResults
         ? [...state.recentResults, ...results].slice(-state.maxRecentResults)
         : [...state.recentResults, ...results];
+      const combinedRaw = state.recentRawSamples.length + rawSamples.length > state.maxRecentResults
+        ? [...state.recentRawSamples, ...rawSamples].slice(-state.maxRecentResults)
+        : [...state.recentRawSamples, ...rawSamples];
       return {
-        recentResults: combined,
+        recentResults: combinedResults,
+        recentRawSamples: combinedRaw,
         latestCommand: last.gateDecision.command,
         latestConfidence: lastWithEvent?.classification?.confidence ?? state.latestConfidence,
       };
     });
 
     if (get().isRecording) {
-      const rows: RecordRow[] = results.map((r) => ({
-        timestamp: r.timestampS,
-        filteredAf7: r.filteredAf7,
-        filteredAf8: r.filteredAf8,
-        derivedFrontalSignal: r.frontalSignal,
-        signalQuality: r.signalQuality.quality,
-        candidateActive: r.candidate !== null,
-        classificationValid: r.classification?.isValidBlink ?? null,
-        confidence: r.classification?.confidence ?? null,
-        stateEvent: r.stateEvent?.eventType ?? "",
-        command: r.gateDecision.command,
-      }));
+      const rows: RecordRow[] = results.map((r, i) => {
+        const raw = rawSamples[i];
+        return {
+          timestamp: r.timestampS,
+          af7: raw?.af7 ?? NaN,
+          af8: raw?.af8 ?? NaN,
+          tp9: raw?.tp9 ?? NaN,
+          tp10: raw?.tp10 ?? NaN,
+          accelX: raw?.accelX ?? null,
+          accelY: raw?.accelY ?? null,
+          accelZ: raw?.accelZ ?? null,
+          filteredAf7: r.filteredAf7,
+          filteredAf8: r.filteredAf8,
+          derivedFrontalSignal: r.frontalSignal,
+          signalQuality: r.signalQuality.quality,
+          candidateActive: r.candidate !== null,
+          classificationValid: r.classification?.isValidBlink ?? null,
+          confidence: r.classification?.confidence ?? null,
+          stateEvent: r.stateEvent?.eventType ?? "",
+          command: r.gateDecision.command,
+        };
+      });
       get().appendRecordedRows(rows);
     }
   },
@@ -175,6 +202,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   reset: () =>
     set({
       recentResults: [],
+      recentRawSamples: [],
       latestCommand: "HOLD",
       latestConfidence: null,
       latencySummary: {},

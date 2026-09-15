@@ -45,7 +45,7 @@ class AppEngine {
   private handleWorkerMessage(msg: WorkerToMainMessage): void {
     if (msg.type !== "results") return;
     const store = useAppStore.getState();
-    store.pushResults(msg.results);
+    store.pushResults(msg.results, msg.rawSamples);
     store.setLatencySummary(msg.latencySummary);
 
     for (const result of msg.results) {
@@ -163,6 +163,26 @@ class AppEngine {
       window.clearInterval(this.simulationTimer);
       this.simulationTimer = null;
     }
+  }
+
+  // ---- Replay mode (Recorder page) -----------------------------------------
+  replaySamples(samples: Sample[]): void {
+    this.disconnectMuse();
+    this.stopSimulation();
+    this.ensureWorker();
+    useAppStore.getState().setMode("replay");
+    useAppStore.getState().reset();
+
+    const fsHz = useAppStore.getState().fsHz;
+    let cursor = 0;
+    const samplesPerTick = Math.max(Math.round(fsHz * 0.02), 1);
+
+    this.simulationTimer = window.setInterval(() => {
+      const end = Math.min(cursor + samplesPerTick, samples.length);
+      for (let i = cursor; i < end; i++) this.enqueueSample(samples[i]);
+      cursor = end;
+      if (cursor >= samples.length) this.stopSimulation();
+    }, 20);
   }
 
   // ---- ESP32 ---------------------------------------------------------------

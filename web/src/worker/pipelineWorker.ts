@@ -6,7 +6,7 @@
  */
 /// <reference lib="webworker" />
 import { BlinkPipeline } from "../core/pipeline";
-import { defaultCalibrationStats, type CalibrationStats } from "../core/types";
+import { defaultCalibrationStats, type CalibrationStats, type Sample } from "../core/types";
 import type { MainToWorkerMessage, WorkerResultsMessage } from "./workerProtocol";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -15,6 +15,7 @@ let pipeline: BlinkPipeline | null = null;
 let commOk = true;
 let currentCalibrationStats: CalibrationStats = defaultCalibrationStats();
 let resultBuffer: ReturnType<BlinkPipeline["processSample"]>[] = [];
+let rawSampleBuffer: Sample[] = [];
 
 const FLUSH_INTERVAL_MS = 33; // ~30 FPS UI update rate; processing itself is not throttled
 
@@ -23,9 +24,11 @@ function flush(): void {
   const message: WorkerResultsMessage = {
     type: "results",
     results: resultBuffer,
+    rawSamples: rawSampleBuffer,
     latencySummary: pipeline.latency.summary(),
   };
   resultBuffer = [];
+  rawSampleBuffer = [];
   ctx.postMessage(message);
 }
 
@@ -43,6 +46,7 @@ ctx.onmessage = (event: MessageEvent<MainToWorkerMessage>) => {
       if (!pipeline) break;
       for (const sample of msg.samples) {
         resultBuffer.push(pipeline.processSample(sample));
+        rawSampleBuffer.push(sample);
       }
       // Bound memory if the main thread somehow stalls consuming results.
       if (resultBuffer.length > 5000) flush();
