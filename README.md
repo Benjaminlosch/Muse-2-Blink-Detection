@@ -82,13 +82,24 @@ flowchart LR
 **Mode A** (build/validate first — what this repository actually implements
 and tests): `Muse 2 → PC → acquisition → DSP → blink detector → OPEN/CLOSE/HOLD
 → ESP32`. This lets you plot, debug, calibrate, and record data with full
-visibility into every stage.
+visibility into every stage. The web app's role in this mode — and its
+*only* role, by design (see [docs/CALIBRATION.md](docs/CALIBRATION.md)) — is
+connecting to the Muse 2, live-viewing the signal, and calibrating.
 
-**Mode B** (eventual embedded target, not yet started): `Muse 2 → ESP32 →
-DSP → blink detector → hand control`, i.e. everything running on the ESP32
-directly. Direct Muse 2 → ESP32 BLE has not been implemented — no BLE GATT
-UUIDs, packet formats, or pairing behavior have been fabricated anywhere in
-this codebase (see [docs/ESP32_SETUP.md](docs/ESP32_SETUP.md) "Mode B").
+**Mode B** (the embedded target — implemented, not yet hardware-verified):
+`Muse 2 → ESP32 → DSP → blink detector → hand control`, i.e. everything
+running on the ESP32 directly, no PC/browser/server at runtime. Direct
+Muse 2 → ESP32 BLE, and a full C++ port of the detection/classification
+pipeline, now exist in `firmware/esp32/` (the `esp32dev_standalone` build
+environment) and compile/link cleanly against the real ESP32 toolchain — see
+[docs/ESP32_SETUP.md](docs/ESP32_SETUP.md) "Mode B" for what's implemented,
+what's verified vs. not, and the calibrate-on-the-website →
+**Export ESP32 Config** → drop into `pipeline_config.h` → flash workflow
+that is the actual point of the web app. No BLE GATT UUIDs, packet formats,
+or pairing behavior were fabricated anywhere in this codebase — all of it
+was verified against real reference implementations first (see
+[docs/WEB_BLUETOOTH.md](docs/WEB_BLUETOOTH.md)). This has never been run
+against physical hardware — WAITING FOR HARDWARE VERIFICATION.
 
 See [docs/SIGNAL_PIPELINE.md](docs/SIGNAL_PIPELINE.md) for the detailed
 per-stage signal-processing flowchart (filtering → spatial combination →

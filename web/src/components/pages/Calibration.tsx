@@ -8,6 +8,8 @@ import { useAppStore } from "../../state/appStore";
 import { Card } from "../common/Card";
 import { Button } from "../common/Button";
 import { loadCalibrationFromStorage, saveCalibrationToStorage } from "../../state/calibrationStorage";
+import { generatePipelineConfigHeader } from "../../core/exportEsp32Config";
+import { downloadTextFile } from "../../state/recording";
 
 type StepLabel = "REST" | "SINGLE_BLINK" | "DOUBLE_BLINK";
 
@@ -145,6 +147,13 @@ export function Calibration() {
     appEngine.applyConfig();
   }
 
+  const storeCalibrationStats = useAppStore((s) => s.calibrationStats);
+
+  function exportEsp32ConfigFile(stats: CalibrationStats, cfg = config) {
+    const header = generatePipelineConfigHeader(cfg, stats);
+    downloadTextFile("pipeline_config.h", header, "text/x-c++hdr");
+  }
+
   const acquiring = useAppStore((s) => s.museConnState === "connected" || s.mode === "simulate");
 
   return (
@@ -162,6 +171,9 @@ export function Calibration() {
               Start Calibration ({steps.length} trials)
             </Button>
             <Button onClick={loadSaved}>Load Saved Calibration</Button>
+            <Button onClick={() => exportEsp32ConfigFile(storeCalibrationStats)} disabled={storeCalibrationStats.nSingleCandidates === 0}>
+              Export ESP32 Config
+            </Button>
             {!acquiring && <span className="text-xs text-[var(--text-dim)]">Connect a Muse 2 or start Simulation Mode first.</span>}
           </div>
         )}
@@ -193,6 +205,11 @@ export function Calibration() {
             </div>
             <div className="flex gap-2">
               <Button variant="primary" onClick={save}>Save Calibration</Button>
+              <Button
+                onClick={() => exportEsp32ConfigFile(resultStats, mergeConfig(config, deriveConfigOverrides(resultStats)))}
+              >
+                Export ESP32 Config
+              </Button>
               <Button onClick={start}>Retry</Button>
               <Button variant="danger" onClick={discard}>Discard</Button>
             </div>

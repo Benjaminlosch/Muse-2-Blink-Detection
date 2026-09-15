@@ -9,6 +9,28 @@
 // unloaded mechanism -> physical hand).
 #pragma once
 
+// ===== Operating mode selection =====
+// OPERATING_MODE_SERIAL (default, "Mode A"): the ESP32 is a dumb-but-safe
+// serial receiver — a PC/browser does all EEG acquisition and blink
+// detection, and sends OPEN/CLOSE/HOLD over USB serial. This is the
+// original, most-verified path (see docs/TESTING.md).
+//
+// OPERATING_MODE_STANDALONE ("Mode B"): the ESP32 connects directly to a
+// Muse 2 over BLE (src/muse_ble_client.cpp) and runs the entire detection/
+// classification pipeline itself (lib/core/blink_pipeline.h) — no PC,
+// browser, or serial link needed at runtime. Calibrate on the web app
+// first (project brief: "train it up... then upload it to GitHub"), export
+// the tuned thresholds from the Calibration page, drop the generated
+// pipeline_config.h into lib/core/, then build with
+// `-D OPERATING_MODE_STANDALONE=1`. WAITING FOR HARDWARE VERIFICATION —
+// see docs/ESP32_SETUP.md "Mode B".
+#if !defined(OPERATING_MODE_SERIAL) && !defined(OPERATING_MODE_STANDALONE)
+#define OPERATING_MODE_SERIAL 1
+#endif
+#if defined(OPERATING_MODE_SERIAL) && defined(OPERATING_MODE_STANDALONE)
+#error "Define exactly one of OPERATING_MODE_SERIAL or OPERATING_MODE_STANDALONE, not both."
+#endif
+
 // ===== Motor interface selection =====
 // Exactly one of these should be defined. MOTOR_MODE_DC_HBRIDGE is the
 // default: it's the more fully-specified historical configuration (4 pins:

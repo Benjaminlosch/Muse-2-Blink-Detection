@@ -13,8 +13,11 @@
 // real prosthetic hand.
 #include <Arduino.h>
 
-#include "comms.h"
 #include "config.h"
+
+#if defined(OPERATING_MODE_SERIAL)
+
+#include "comms.h"
 #include "diagnostics.h"
 #include "motor.h"
 #include "protocol.h"
@@ -91,3 +94,5 @@ void loop() {
     g_last_state_broadcast_ms = now;
   }
 }
+
+#endif  // OPERATING_MODE_SERIAL

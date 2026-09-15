@@ -104,3 +104,37 @@ Just re-run `scripts/calibrate.py` — it overwrites
 in `.gitignore` — these are machine/user-specific, not committed). There is
 no separate "reset" command: delete the file to fall back to
 `config/default_config.yaml`'s defaults.
+
+## Calibrating from the web app, and exporting to the ESP32
+
+The web app (`web/src/components/pages/Calibration.tsx`) runs the same
+guided REST → SINGLE_BLINK → DOUBLE_BLINK trial sequence and the same
+median/MAD statistics (`core/detection/calibration.ts`, a verified port of
+`detection/calibration.py`) against a live Muse 2 connected over Web
+Bluetooth, or against Simulation Mode. This is the intended day-to-day way
+to calibrate — the website's role is strictly this: connect to the Muse 2,
+run and preview calibration, and produce a tuned config. It is not meant to
+grow beyond that (see [ESP32_SETUP.md](ESP32_SETUP.md) "Mode B").
+
+After a calibration run completes, two buttons are available:
+
+- **Save Calibration** — applies the derived thresholds to the running web
+  app itself (for Mode A: PC/browser does detection, ESP32 is a serial
+  motor controller) and persists them to browser storage.
+- **Export ESP32 Config** — downloads `pipeline_config.h`, a compile-time
+  C++ header with the same derived thresholds baked in as constants
+  (`web/src/core/exportEsp32Config.ts`; see that file and
+  `firmware/esp32/lib/core/pipeline_config.h`'s own header comments). Drop
+  this in place of `firmware/esp32/lib/core/pipeline_config.h` and rebuild
+  the `esp32dev_standalone` environment — this is the entire "train on the
+  website, then run standalone on the ESP32 with no PC/server involved"
+  workflow. The idle-screen version of this button uses whatever
+  calibration is already loaded (from a prior session, via **Load Saved
+  Calibration**); the post-wizard version uses the just-computed results
+  directly, before you decide whether to also **Save Calibration**.
+
+This export path and the drop-in rebuild have both been verified in this
+repo's dev environment (see [TESTING.md](TESTING.md) and
+[ESP32_SETUP.md](ESP32_SETUP.md)); an actual BLE connection to a physical
+Muse 2, from either the browser or the ESP32 directly, has not — see
+"WAITING FOR HARDWARE VERIFICATION" in those documents.

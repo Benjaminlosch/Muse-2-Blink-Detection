@@ -83,11 +83,20 @@ built).
 
 ### What has been verified in this environment
 
-- **The full firmware compiles** against the real ESP32 toolchain
+- **Both firmware environments compile** against the real ESP32 toolchain
   (PlatformIO + `espressif32` platform + `arduino-esp32` framework),
-  installed and verified here: `pio run -e esp32dev` succeeds for both
-  hardware configurations (`MOTOR_MODE_DC_HBRIDGE`, the default, and
-  `MOTOR_MODE_SERVO`).
+  installed and verified here: `pio run -e esp32dev` (Mode A, both
+  `MOTOR_MODE_DC_HBRIDGE` and `MOTOR_MODE_SERVO`) and
+  `pio run -e esp32dev_standalone` (Mode B) both succeed.
+- **`esp32dev_standalone` links against real NimBLE-Arduino with zero
+  errors** — the full BLE central client (`src/muse_ble_client.cpp`) and
+  the complete detection/classification pipeline port
+  (`lib/core/blink_pipeline.cpp` and its dependencies) compile and link
+  cleanly. 11.7% RAM / 48.1% flash used per the build's own reporting.
+- **The generated-config drop-in workflow was verified end-to-end**: the
+  web app's `generatePipelineConfigHeader()` output was substituted for
+  `firmware/esp32/lib/core/pipeline_config.h` and the standalone
+  environment rebuilt successfully from it.
 - **The embedded DSP recursion is numerically verified against Python**: the
   exact Direct-Form-II-Transposed biquad recursion used in
   `firmware/esp32/lib/core/dsp.cpp` was independently re-implemented in
@@ -98,6 +107,11 @@ built).
   production Python `CausalBlinkBandFilter` is compared against the C++ port
   at every ESP32 boot (`runDspSelfTest()` in `src/diagnostics.cpp`, printed
   over serial as `DSP_SELF_TEST:PASS`/`FAIL`).
+- **The Muse 2 BLE protocol decode logic (`lib/core/muse_protocol.cpp`) was
+  manually cross-checked** against a live run of the reference JS encoder
+  (`node -e "..."` computing the exact expected byte sequence for
+  `encodeControlCommand("p21")` etc.) before being trusted, not just
+  translated and assumed correct — see that file's own comments.
 
 ### What has NOT been verified
 

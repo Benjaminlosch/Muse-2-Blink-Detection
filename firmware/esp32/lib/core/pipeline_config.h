@@ -1,0 +1,68 @@
+// Standalone (Mode B) pipeline configuration — mirrors
+// config/default_config.yaml / web/src/core/config.ts's defaults.
+//
+// THIS FILE GETS REPLACED BY CALIBRATION: the web app's Calibration page
+// has an "Export ESP32 Config" button that generates a replacement for
+// this exact file with your own tuned thresholds (see docs/CALIBRATION.md
+// and docs/ESP32_SETUP.md "Mode B"). Calibrate on the website first, then
+// download the generated pipeline_config.h and drop it in here before
+// flashing — that's the entire "training" workflow: tune on the website,
+// bake the result into the firmware, run standalone from then on.
+#pragma once
+
+namespace bcihand {
+
+struct PipelineConfig {
+  // acquisition
+  double fsHz = 256.0;
+
+  // dsp — baseline tracker only (bandpass/notch coefficients are fixed at
+  // compile time in dsp_coeffs.h; see docs/TESTING.md for how to
+  // regenerate those if config/default_config.yaml's dsp section changes)
+  double baselineTrackerTimeConstantS = 4.0;
+  bool notchEnabled = true;
+
+  // spatial
+  double af7Af8MinCorrelation = 0.6;
+  double af7Af8MaxAmplitudeRatio = 3.0;
+
+  // candidate_detection
+  double thresholdMadMultiplier = 4.0;
+  double minBlinkWidthS = 0.06;
+  double maxBlinkWidthS = 0.4;
+  double minProminenceUv = 20.0;
+  double refractoryAfterCandidateS = 0.15;
+  double reboundGuardS = 0.3;
+  double reboundRefractoryS = 0.02;
+
+  // double_blink
+  double doubleBlinkMinIntervalS = 0.08;
+  double doubleBlinkMaxIntervalS = 0.6;
+  double doubleBlinkWaitForSecondTimeoutS = 0.7;
+  double doubleBlinkRefractoryAfterDoubleS = 0.5;
+
+  // confidence
+  double highConfidenceThreshold = 0.80;
+  double mediumConfidenceThreshold = 0.55;
+  double minSignalQuality = 0.5;
+
+  // motion_veto
+  bool motionVetoEnabled = true;
+  double motionVetoAccelEnergyThresholdG2 = 0.05;
+  double motionVetoConfidencePenalty = 0.5;
+
+  // calibration (from detection/calibration.py's CalibrationStats — only
+  // the fields the classifier's soft-confidence scoring consumes; see
+  // blink_classifier.h)
+  double calibrationNoiseFloorMedian = 0.0;
+  double calibrationNoiseFloorMad = 0.0;
+};
+
+// The active configuration. Uses PipelineConfig's own defaults above
+// unless a calibration export has replaced this file's values.
+inline const PipelineConfig& activePipelineConfig() {
+  static const PipelineConfig kConfig{};
+  return kConfig;
+}
+
+}  // namespace bcihand
