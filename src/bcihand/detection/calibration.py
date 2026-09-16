@@ -75,17 +75,29 @@ class CalibrationStats:
     # min_blink_width_s can't reject it either.
     double_blink_second_pulse_duration_median_s: float = 0.0
     double_blink_second_pulse_duration_mad_s: float = 0.0
+    # Same idea again for the AF7/AF8 (or whichever primary_channels pair)
+    # bilateral-agreement gate: a weaker, tail-riding second pulse has worse
+    # SNR, which can genuinely lower its measured correlation and raise its
+    # amplitude ratio relative to an isolated blink. Measured directly so
+    # the agreement gate can't reject it either — see derive_config_overrides.
+    double_blink_second_pulse_correlation_median: float = 0.0
+    double_blink_second_pulse_correlation_mad: float = 0.0
+    double_blink_second_pulse_amplitude_ratio_median: float = 0.0
+    double_blink_second_pulse_amplitude_ratio_mad: float = 0.0
 
     n_rest_trials: int = 0
     n_single_trials: int = 0
     n_double_trials: int = 0
 
     def derive_config_overrides(self, prominence_margin_sigma: float = 1.5,
-                                 interval_margin_s: float = 0.15,
+                                 interval_margin_s: float = 0.35,
                                  min_relative_prominence_spread: float = 0.5,
                                  min_duration_spread_s: float = 0.02,
-                                 second_pulse_margin_sigma: float = 1.0,
-                                 min_relative_second_pulse_spread: float = 0.3) -> dict:
+                                 second_pulse_margin_sigma: float = 1.5,
+                                 min_relative_second_pulse_spread: float = 0.5,
+                                 min_spacing_spread_s: float = 0.15,
+                                 agreement_correlation_margin: float = 0.15,
+                                 agreement_amplitude_ratio_margin: float = 1.0) -> dict:
         """Turn measured stats into a config-override dict compatible with
         config/default_config.yaml's structure (deep-merged as
         config/calibration_active.yaml).
@@ -168,14 +180,21 @@ class CalibrationStats:
             # min_blink_width_s above what was actually measured.
             second_pulse_duration_spread = max(self.double_blink_second_pulse_duration_mad_s, min_duration_spread_s)
             min_width = min(min_width, max(
-                self.double_blink_second_pulse_duration_median_s - 2 * second_pulse_duration_spread, 0.02,
+                self.double_blink_second_pulse_duration_median_s - 3 * second_pulse_duration_spread, 0.02,
             ))
 
+        wait_for_second_timeout = None
         if self.n_double_pairs > 0:
             spacing = self.double_blink_spacing_median_s
-            spacing_spread = max(self.double_blink_spacing_mad_s * MAD_TO_SIGMA, 0.05)
+            spacing_spread = max(self.double_blink_spacing_mad_s * MAD_TO_SIGMA, min_spacing_spread_s)
             min_interval = max(spacing - spacing_spread - interval_margin_s, 0.08)
             max_interval = spacing + spacing_spread + interval_margin_s
+            # A handful of calibration trials don't pin down true attempt-to-
+            # attempt timing variability; give the wait-for-second-blink
+            # timeout generous headroom above max_interval so a slightly
+            # slower live attempt doesn't time out before the state machine
+            # even gets to check the interval bound.
+            wait_for_second_timeout = max_interval + 0.3
         else:
             min_interval, max_interval = None, None
 
@@ -191,7 +210,44 @@ class CalibrationStats:
             overrides["double_blink"] = {
                 "min_interval_s": round(min_interval, 4),
                 "max_interval_s": round(max_interval, 4),
+                "wait_for_second_timeout_s": round(wait_for_second_timeout, 4),
             }
+
+        # Same ceiling/floor pattern as prominence/duration above: a weaker,
+        # tail-riding second pulse can genuinely show lower AF7/AF8 (or
+        # whichever primary_channels pair) correlation and a higher
+        # amplitude ratio than an isolated blink. Never derive an agreement
+        # gate stricter than what was actually measured for a verified
+        # double blink — but still clamp to a sane absolute bound so this
+        # can't be loosened into uselessness against genuine single-
+        # electrode noise/coughs, which the calibration session never saw.
+        # Guarded by prominence_median (not correlation_median) as the "do
+        # we actually have second-pulse feature data" signal: correlation
+        # can legitimately be zero or negative for a genuinely weak/noisy
+        # second pulse — exactly the case this override most needs to
+        # loosen for — so it can't double as its own "no data" sentinel the
+        # way prominence (always >= 0, and > 0 for any real candidate) can.
+        # All four second-pulse features are populated together from the
+        # same measurement, so prominence_median > 0 reliably implies the
+        # others were measured too.
+        if self.n_double_pairs > 0 and self.double_blink_second_pulse_prominence_median > 0:
+            # Only ever LOOSEN relative to config/default_config.yaml's own
+            # defaults (0.6 / 3.0) — never derive something stricter than
+            # the shipped starting hypothesis, and never loosen past a sane
+            # absolute bound (0.2 / 6.0) that would defeat this gate's whole
+            # purpose against single-electrode noise/coughs the calibration
+            # session never saw.
+            derived_min_correlation = min(max(
+                self.double_blink_second_pulse_correlation_median - agreement_correlation_margin, 0.2,
+            ), 0.6)
+            derived_max_ratio = max(min(
+                self.double_blink_second_pulse_amplitude_ratio_median + agreement_amplitude_ratio_margin, 6.0,
+            ), 3.0)
+            overrides["spatial"] = {
+                "af7_af8_min_correlation": round(derived_min_correlation, 4),
+                "af7_af8_max_amplitude_ratio": round(derived_max_ratio, 4),
+            }
+
         return overrides
 
     def save(self, path: Path | str) -> None:
@@ -255,6 +311,8 @@ def compute_calibration_stats(segments: list[TrialSegment], fs_hz: float) -> Cal
     double_spacings: list[float] = []
     double_second_pulse_prominences: list[float] = []
     double_second_pulse_durations: list[float] = []
+    double_second_pulse_correlations: list[float] = []
+    double_second_pulse_amplitude_ratios: list[float] = []
 
     for seg in segments:
         candidates = _find_candidates_in_segment(seg, fs_hz)
@@ -297,6 +355,8 @@ def compute_calibration_stats(segments: list[TrialSegment], fs_hz: float) -> Cal
                 )
                 double_second_pulse_prominences.append(b_features.peak_prominence)
                 double_second_pulse_durations.append(b.duration_s)
+                double_second_pulse_correlations.append(b_features.af7_af8_correlation)
+                double_second_pulse_amplitude_ratios.append(b_features.af7_af8_amplitude_ratio)
 
     stats.normal_blink_peak_median, stats.normal_blink_peak_mad = _median_mad(normal_peaks)
     stats.n_rest_candidates = len(normal_peaks)
@@ -315,6 +375,12 @@ def compute_calibration_stats(segments: list[TrialSegment], fs_hz: float) -> Cal
     )
     stats.double_blink_second_pulse_duration_median_s, stats.double_blink_second_pulse_duration_mad_s = (
         _median_mad(double_second_pulse_durations)
+    )
+    stats.double_blink_second_pulse_correlation_median, stats.double_blink_second_pulse_correlation_mad = (
+        _median_mad(double_second_pulse_correlations)
+    )
+    stats.double_blink_second_pulse_amplitude_ratio_median, stats.double_blink_second_pulse_amplitude_ratio_mad = (
+        _median_mad(double_second_pulse_amplitude_ratios)
     )
 
     return stats

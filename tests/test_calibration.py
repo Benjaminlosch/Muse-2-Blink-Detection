@@ -225,3 +225,73 @@ def test_calibrated_pipeline_detects_a_fresh_double_blink_of_similar_amplitude()
         "A fresh double blink of similar amplitude to the calibration trials must still be "
         "recognized as DOUBLE_BLINK_CONFIRMED after calibration"
     )
+
+
+def _build_calibration_segments_asymmetric_noise(seed: int = 7, asym_noise_uv: float = 15.0) -> list[TrialSegment]:
+    """Like _build_calibration_segments_tight_double_blink, but the
+    DOUBLE_BLINK trials additionally get independent, asymmetric noise added
+    to AF7 vs AF8 — mimicking a real second pulse whose worse SNR
+    legitimately drags down its measured AF7/AF8 correlation and raises its
+    amplitude ratio, not just its prominence/duration.
+    """
+    rng = np.random.default_rng(seed + 1000)
+    sim = SignalSimulator(fs_hz=FS, seed=seed)
+    segments = [_filtered_segment(sim, "REST", [], 3.0) for _ in range(3)]
+    segments += [
+        _filtered_segment(
+            sim, "SINGLE_BLINK",
+            [SimEvent("single_blink", onset_s=1.0, duration_s=0.18, params={"amplitude_uv": 90})],
+            2.5,
+        )
+        for _ in range(3)
+    ]
+    for _ in range(3):
+        rec = sim.render(3.0, [SimEvent("double_blink", onset_s=1.0, duration_s=0.5, params={"amplitude_uv": 90, "gap_s": 0.10})])
+        af7 = CausalBlinkBandFilter(FS, 0.5, 20.0, notch_hz=60.0).process_block(rec.channels["AF7"])
+        af8 = CausalBlinkBandFilter(FS, 0.5, 20.0, notch_hz=60.0).process_block(rec.channels["AF8"])
+        af7 = af7 + rng.normal(0, asym_noise_uv, size=af7.shape)
+        af8 = af8 + rng.normal(0, asym_noise_uv * 1.5, size=af8.shape)
+        frontal = (af7 + af8) / 2.0
+        segments.append(TrialSegment(label="DOUBLE_BLINK", frontal=frontal, af7=af7, af8=af8))
+    return segments
+
+
+def test_derive_config_overrides_loosens_agreement_gate_for_a_noisier_second_pulse():
+    """Regression test: a real double blink's second pulse can legitimately
+    measure worse AF7/AF8 correlation / a higher amplitude ratio than an
+    isolated single blink (worse SNR from riding the first pulse's decaying
+    tail). derive_config_overrides must loosen af7_af8_min_correlation /
+    af7_af8_max_amplitude_ratio to accommodate what was actually measured —
+    but never past the absolute safety bound (0.2 / 6.0), and never tighter
+    than the shipped default (0.6 / 3.0) either way.
+    """
+    stats = compute_calibration_stats(_build_calibration_segments_asymmetric_noise(), FS)
+    assert stats.n_double_pairs > 0
+    assert stats.double_blink_second_pulse_correlation_median < 0.6  # degraded enough to matter
+
+    overrides = stats.derive_config_overrides()
+    spatial = overrides["spatial"]
+    assert 0.2 <= spatial["af7_af8_min_correlation"] < 0.6
+    assert 3.0 <= spatial["af7_af8_max_amplitude_ratio"] <= 6.0
+
+
+def test_derive_config_overrides_never_loosens_agreement_gate_for_a_clean_second_pulse():
+    """The opposite direction: when the second pulse's measured correlation/
+    ratio are already comfortably within the shipped defaults, the override
+    must stay AT the defaults, not drift stricter or looser for no reason.
+    """
+    stats = compute_calibration_stats(_build_calibration_segments_tight_double_blink(), FS)
+    overrides = stats.derive_config_overrides()
+    spatial = overrides["spatial"]
+    assert spatial["af7_af8_min_correlation"] == 0.6
+    assert spatial["af7_af8_max_amplitude_ratio"] == 3.0
+
+
+def test_derive_config_overrides_widens_wait_for_second_timeout():
+    stats = compute_calibration_stats(_build_calibration_segments_tight_double_blink(), FS)
+    overrides = stats.derive_config_overrides()
+    db = overrides["double_blink"]
+    assert db["wait_for_second_timeout_s"] > db["max_interval_s"]
+    # Comfortably above the old fixed 0.7s default so a slightly slower live
+    # attempt doesn't time out before the interval bound is even checked.
+    assert db["wait_for_second_timeout_s"] >= 0.7

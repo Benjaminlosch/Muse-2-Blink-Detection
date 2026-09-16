@@ -126,6 +126,12 @@ export interface CalibrationStats {
   doubleBlinkSecondPulseProminenceMad: number;
   doubleBlinkSecondPulseDurationMedianS: number;
   doubleBlinkSecondPulseDurationMadS: number;
+  // Same idea for the AF7/AF8 (or whichever primaryChannels pair)
+  // bilateral-agreement gate — see deriveConfigOverrides.
+  doubleBlinkSecondPulseCorrelationMedian: number;
+  doubleBlinkSecondPulseCorrelationMad: number;
+  doubleBlinkSecondPulseAmplitudeRatioMedian: number;
+  doubleBlinkSecondPulseAmplitudeRatioMad: number;
   nRestTrials: number;
   nSingleTrials: number;
   nDoubleTrials: number;
@@ -141,6 +147,8 @@ export function defaultCalibrationStats(): CalibrationStats {
     doubleBlinkSpacingMedianS: 0, doubleBlinkSpacingMadS: 0, nDoublePairs: 0,
     doubleBlinkSecondPulseProminenceMedian: 0, doubleBlinkSecondPulseProminenceMad: 0,
     doubleBlinkSecondPulseDurationMedianS: 0, doubleBlinkSecondPulseDurationMadS: 0,
+    doubleBlinkSecondPulseCorrelationMedian: 0, doubleBlinkSecondPulseCorrelationMad: 0,
+    doubleBlinkSecondPulseAmplitudeRatioMedian: 0, doubleBlinkSecondPulseAmplitudeRatioMad: 0,
     nRestTrials: 0, nSingleTrials: 0, nDoubleTrials: 0,
   };
 }

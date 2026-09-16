@@ -3,6 +3,7 @@ import { CausalBlinkBandFilter } from "../dsp/filters";
 import { BlinkPipeline } from "../pipeline";
 import { defaultConfig, mergeConfig } from "../config";
 import { SignalSimulator } from "../simulation/signalGenerator";
+import { SeededRng } from "../utils/rng";
 import type { Sample } from "../types";
 import { computeCalibrationStats, deriveConfigOverrides, type TrialSegment } from "./calibration";
 
@@ -151,5 +152,58 @@ describe("deriveConfigOverrides double-blink second-pulse ceiling", () => {
       .map((s) => pipeline.processSample(s))
       .filter((r) => r.stateEvent?.eventType === "DOUBLE_BLINK_CONFIRMED");
     expect(doubles.length).toBe(1);
+  });
+
+  it("widens waitForSecondTimeoutS beyond maxIntervalS", () => {
+    const stats = computeCalibrationStats(buildTightDoubleBlinkSegments(7), FS);
+    const overrides = deriveConfigOverrides(stats);
+    const db = overrides.doubleBlink!;
+    expect(db.waitForSecondTimeoutS!).toBeGreaterThan(db.maxIntervalS!);
+    expect(db.waitForSecondTimeoutS!).toBeGreaterThanOrEqual(0.7);
+  });
+});
+
+function buildAsymmetricNoiseDoubleBlinkSegments(seed = 7, asymNoiseUv = 15.0): TrialSegment[] {
+  const rng = new SeededRng(seed + 1000);
+  const sim = new SignalSimulator(FS, 52.0, seed);
+  const segments: TrialSegment[] = [];
+  for (let i = 0; i < 3; i++) segments.push(filteredSegment(sim, "REST", [], 3.0));
+  for (let i = 0; i < 3; i++) {
+    segments.push(
+      filteredSegment(sim, "SINGLE_BLINK", [{ label: "single_blink", onsetS: 1.0, durationS: 0.18, params: { amplitude_uv: 90 } }], 2.5),
+    );
+  }
+  for (let i = 0; i < 3; i++) {
+    const rec = sim.render(3.0, [{ label: "double_blink", onsetS: 1.0, durationS: 0.5, params: { amplitude_uv: 90, gap_s: 0.10 } }]);
+    const af7 = new CausalBlinkBandFilter(FS, 4.0, true).processBlock(rec.channels.AF7);
+    const af8 = new CausalBlinkBandFilter(FS, 4.0, true).processBlock(rec.channels.AF8);
+    for (let i2 = 0; i2 < af7.length; i2++) af7[i2] += rng.normal(0, asymNoiseUv);
+    for (let i2 = 0; i2 < af8.length; i2++) af8[i2] += rng.normal(0, asymNoiseUv * 1.5);
+    const frontal = new Float64Array(af7.length);
+    for (let i2 = 0; i2 < af7.length; i2++) frontal[i2] = (af7[i2] + af8[i2]) / 2;
+    segments.push({ label: "DOUBLE_BLINK", frontal, af7, af8 });
+  }
+  return segments;
+}
+
+describe("deriveConfigOverrides AF7/AF8 agreement-gate loosening", () => {
+  it("loosens the agreement gate for a noisier second pulse", () => {
+    const stats = computeCalibrationStats(buildAsymmetricNoiseDoubleBlinkSegments(), FS);
+    expect(stats.nDoublePairs).toBeGreaterThan(0);
+    expect(stats.doubleBlinkSecondPulseCorrelationMedian).toBeLessThan(0.6);
+
+    const overrides = deriveConfigOverrides(stats);
+    const spatial = overrides.spatial!;
+    expect(spatial.af7Af8MinCorrelation!).toBeGreaterThanOrEqual(0.2);
+    expect(spatial.af7Af8MinCorrelation!).toBeLessThan(0.6);
+    expect(spatial.af7Af8MaxAmplitudeRatio!).toBeGreaterThanOrEqual(3.0);
+    expect(spatial.af7Af8MaxAmplitudeRatio!).toBeLessThanOrEqual(6.0);
+  });
+
+  it("never loosens the agreement gate for a clean second pulse", () => {
+    const stats = computeCalibrationStats(buildTightDoubleBlinkSegments(7), FS);
+    const overrides = deriveConfigOverrides(stats);
+    expect(overrides.spatial!.af7Af8MinCorrelation).toBe(0.6);
+    expect(overrides.spatial!.af7Af8MaxAmplitudeRatio).toBe(3.0);
   });
 });

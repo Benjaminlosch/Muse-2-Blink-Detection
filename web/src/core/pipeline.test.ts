@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { defaultConfig } from "./config";
+import { defaultConfig, mergeConfig } from "./config";
 import { BlinkPipeline } from "./pipeline";
+import { buildDemoScenario, SignalSimulator } from "./simulation/signalGenerator";
 import type { Sample } from "./types";
 
 interface GoldenRunFixture {
@@ -188,5 +189,50 @@ describe("BlinkPipeline vs Python golden run (demo scenario)", () => {
     // events (e.g. the 450uV oversized transient); 1e-4 is a tight
     // relative tolerance, not a loosened one.
     expect(maxAbsDiff).toBeLessThan(1e-4);
+  });
+});
+
+/**
+ * TS mirror of tests/test_end_to_end_simulation.py's
+ * test_demo_scenario_holds_even_with_loosest_plausible_calibration_derived_agreement_gate
+ * — guards the "keep it rejecting coughs/bumps" requirement: the agreement-
+ * gate loosening in core/detection/calibration.ts's deriveConfigOverrides
+ * is capped at af7Af8MinCorrelation=0.2 / af7Af8MaxAmplitudeRatio=6.0 in
+ * the worst case. Confirm that even at those loosest bounds, the full demo
+ * artifact scenario still resolves to HOLD for everything except the two
+ * genuine double blinks.
+ */
+describe("BlinkPipeline demo scenario with loosest plausible calibration-derived agreement gate", () => {
+  it("still holds for every artifact and only confirms the two genuine double blinks", () => {
+    const config = mergeConfig(defaultConfig(), {
+      spatial: { af7Af8MinCorrelation: 0.2, af7Af8MaxAmplitudeRatio: 6.0 },
+    });
+
+    const events = buildDemoScenario();
+    const totalDurationS = Math.max(...events.map((e) => e.onsetS + e.durationS)) + 5.0;
+    const sim = new SignalSimulator(256.0, 52.0, 42);
+    const rec = sim.render(totalDurationS, events);
+
+    const samples: Sample[] = [];
+    for (let i = 0; i < rec.timestamps.length; i++) {
+      samples.push({
+        timestampS: rec.timestamps[i],
+        af7: rec.channels.AF7[i],
+        af8: rec.channels.AF8[i],
+        tp9: rec.channels.TP9[i],
+        tp10: rec.channels.TP10[i],
+        accelX: rec.accel.x[i],
+        accelY: rec.accel.y[i],
+        accelZ: rec.accel.z[i],
+      });
+    }
+
+    const pipeline = new BlinkPipeline(config, 256.0);
+    const results = samples.map((s) => pipeline.processSample(s));
+
+    const doubleBlinks = results.filter((r) => r.stateEvent?.eventType === "DOUBLE_BLINK_CONFIRMED");
+    expect(doubleBlinks.length).toBe(2);
+    const nonHold = results.filter((r) => r.gateDecision.command !== "HOLD");
+    expect(nonHold.map((r) => r.gateDecision.command)).toEqual(["OPEN", "CLOSE"]);
   });
 });

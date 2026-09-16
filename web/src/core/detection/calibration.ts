@@ -82,6 +82,8 @@ export function computeCalibrationStats(segments: TrialSegment[], fsHz: number):
   const doubleSpacings: number[] = [];
   const doubleSecondPulseProminences: number[] = [];
   const doubleSecondPulseDurations: number[] = [];
+  const doubleSecondPulseCorrelations: number[] = [];
+  const doubleSecondPulseAmplitudeRatios: number[] = [];
 
   for (const seg of segments) {
     const candidates = findCandidatesInSegment(seg, fsHz);
@@ -121,6 +123,8 @@ export function computeCalibrationStats(segments: TrialSegment[], fsHz: number):
         );
         doubleSecondPulseProminences.push(bFeatures.peakProminence);
         doubleSecondPulseDurations.push(b.durationS);
+        doubleSecondPulseCorrelations.push(bFeatures.af7Af8Correlation);
+        doubleSecondPulseAmplitudeRatios.push(bFeatures.af7Af8AmplitudeRatio);
       }
     }
   }
@@ -141,6 +145,10 @@ export function computeCalibrationStats(segments: TrialSegment[], fsHz: number):
     medianMad(doubleSecondPulseProminences);
   [stats.doubleBlinkSecondPulseDurationMedianS, stats.doubleBlinkSecondPulseDurationMadS] =
     medianMad(doubleSecondPulseDurations);
+  [stats.doubleBlinkSecondPulseCorrelationMedian, stats.doubleBlinkSecondPulseCorrelationMad] =
+    medianMad(doubleSecondPulseCorrelations);
+  [stats.doubleBlinkSecondPulseAmplitudeRatioMedian, stats.doubleBlinkSecondPulseAmplitudeRatioMad] =
+    medianMad(doubleSecondPulseAmplitudeRatios);
 
   return stats;
 }
@@ -148,11 +156,14 @@ export function computeCalibrationStats(segments: TrialSegment[], fsHz: number):
 export function deriveConfigOverrides(
   stats: CalibrationStats,
   prominenceMarginSigma = 1.5,
-  intervalMarginS = 0.15,
+  intervalMarginS = 0.35,
   minRelativeProminenceSpread = 0.5,
   minDurationSpreadS = 0.02,
-  secondPulseMarginSigma = 1.0,
-  minRelativeSecondPulseSpread = 0.3,
+  secondPulseMarginSigma = 1.5,
+  minRelativeSecondPulseSpread = 0.5,
+  minSpacingSpreadS = 0.15,
+  agreementCorrelationMargin = 0.15,
+  agreementAmplitudeRatioMargin = 1.0,
 ): DeepPartial<BciConfig> & { calibrationStats: CalibrationStats } {
   const prominenceSpread = Math.max(
     stats.intentionalBlinkPeakMad * MAD_TO_SIGMA,
@@ -198,7 +209,7 @@ export function deriveConfigOverrides(
     const secondPulseDurationSpread = Math.max(stats.doubleBlinkSecondPulseDurationMadS, minDurationSpreadS);
     minWidth = Math.min(
       minWidth,
-      Math.max(stats.doubleBlinkSecondPulseDurationMedianS - 2 * secondPulseDurationSpread, 0.02),
+      Math.max(stats.doubleBlinkSecondPulseDurationMedianS - 3 * secondPulseDurationSpread, 0.02),
     );
   }
 
@@ -213,10 +224,43 @@ export function deriveConfigOverrides(
 
   if (stats.nDoublePairs > 0) {
     const spacing = stats.doubleBlinkSpacingMedianS;
-    const spacingSpread = Math.max(stats.doubleBlinkSpacingMadS * MAD_TO_SIGMA, 0.05);
+    const spacingSpread = Math.max(stats.doubleBlinkSpacingMadS * MAD_TO_SIGMA, minSpacingSpreadS);
     const minInterval = Math.max(spacing - spacingSpread - intervalMarginS, 0.08);
     const maxInterval = spacing + spacingSpread + intervalMarginS;
-    overrides.doubleBlink = { minIntervalS: round(minInterval, 4), maxIntervalS: round(maxInterval, 4) };
+    // A handful of calibration trials don't pin down true attempt-to-
+    // attempt timing variability; give the wait-for-second-blink timeout
+    // generous headroom above maxInterval so a slightly slower live
+    // attempt doesn't time out before the interval bound is even checked.
+    const waitForSecondTimeout = maxInterval + 0.3;
+    overrides.doubleBlink = {
+      minIntervalS: round(minInterval, 4),
+      maxIntervalS: round(maxInterval, 4),
+      waitForSecondTimeoutS: round(waitForSecondTimeout, 4),
+    };
+  }
+
+  // Same ceiling/floor pattern as prominence/duration above: a weaker,
+  // tail-riding second pulse can genuinely show lower AF7/AF8 correlation
+  // and a higher amplitude ratio than an isolated blink. Never derive an
+  // agreement gate stricter than the shipped default (0.6 / 3.0), and never
+  // loosen past a sane absolute bound (0.2 / 6.0) that would defeat this
+  // gate's purpose against single-electrode noise/coughs the calibration
+  // session never saw. Guarded by prominenceMedian, not correlationMedian,
+  // as the "do we have second-pulse feature data" signal — correlation can
+  // legitimately be zero or negative for a genuinely weak second pulse.
+  if (stats.nDoublePairs > 0 && stats.doubleBlinkSecondPulseProminenceMedian > 0) {
+    const derivedMinCorrelation = Math.min(
+      Math.max(stats.doubleBlinkSecondPulseCorrelationMedian - agreementCorrelationMargin, 0.2),
+      0.6,
+    );
+    const derivedMaxRatio = Math.max(
+      Math.min(stats.doubleBlinkSecondPulseAmplitudeRatioMedian + agreementAmplitudeRatioMargin, 6.0),
+      3.0,
+    );
+    overrides.spatial = {
+      af7Af8MinCorrelation: round(derivedMinCorrelation, 4),
+      af7Af8MaxAmplitudeRatio: round(derivedMaxRatio, 4),
+    };
   }
 
   return overrides;

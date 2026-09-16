@@ -138,6 +138,45 @@ benefits from this fix automatically (though the new ceiling only has data
 to work with once you calibrate again, since it needs a real measurement
 that wasn't recorded by older calibration runs).
 
+**Broadened further 2026-09-16**, after the above alone still wasn't
+enough on real hardware (double blinks specifically kept getting missed
+even with a fresh post-fix calibration): the same "measure the second
+pulse directly, never derive something stricter than what was verified"
+pattern was extended to every other double-blink-specific gate that can
+independently reject a genuine second pulse:
+
+- **AF7/AF8 agreement** (`spatial.af7_af8_min_correlation` /
+  `af7_af8_max_amplitude_ratio`) — a weaker, tail-riding second pulse has
+  worse SNR, which can legitimately lower its measured channel correlation
+  and raise its amplitude ratio versus an isolated blink. Now derived from
+  the second pulse's actual measured `af7_af8_correlation`/
+  `af7_af8_amplitude_ratio`, loosened only as far as needed (never past an
+  absolute safety bound of 0.2 / 6.0, and never *stricter* than the shipped
+  default of 0.6 / 3.0 either) — this gate would otherwise reject a second
+  pulse for the exact same reason the prominence gate did.
+- **Double-blink interval bounds and timeout** — a handful of calibration
+  trials don't pin down true attempt-to-attempt timing variability. The
+  margins (`interval_margin_s`: 0.15 → 0.35s, the minimum spacing spread
+  floor: 0.05 → 0.15s) are now more generous, and `wait_for_second_timeout_s`
+  is derived from calibration for the first time (previously a fixed 0.7s
+  default regardless of your own measured spacing) — set comfortably above
+  `max_interval_s` so a slightly slower live attempt doesn't time out
+  before the interval bound is even checked.
+- The prominence/duration ceiling margins themselves were also widened
+  (`second_pulse_margin_sigma`: 1.0σ → 1.5σ, `min_relative_second_pulse_spread`:
+  30% → 50%, matching the single-blink formula's own generosity; the
+  duration ceiling's margin factor: 2× → 3× the spread).
+
+None of this touches the *other* rejection gates — signal quality
+(flatline/railed/noise), motion veto, or candidate width bounds — so
+coughs, jaw clenches, head motion, and other artifacts are still rejected
+exactly as before; `tests/test_end_to_end_simulation.py`'s
+`test_demo_scenario_holds_even_with_loosest_plausible_calibration_derived_agreement_gate`
+(and its TS mirror in `core/pipeline.test.ts`) specifically locks this in
+by re-running the full artifact scenario at the loosest possible derived
+agreement-gate bounds and confirming nothing except the two genuine double
+blinks ever produces a non-HOLD command.
+
 ## Running calibration
 
 ```bash

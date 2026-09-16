@@ -20,13 +20,14 @@ from bcihand.classification.command_mapper import Command
 from bcihand.classification.state_machine import BlinkEventType
 from bcihand.pipeline import BlinkPipeline
 from bcihand.simulation.signal_generator import build_demo_scenario
-from bcihand.utils.config import load_config
+from bcihand.utils.config import ConfigNode, apply_overrides, load_config
 
 FS = 256.0
 
 
-def _run_demo_scenario():
-    config = load_config(override_path=False)
+def _run_demo_scenario(config: ConfigNode | None = None):
+    if config is None:
+        config = load_config(override_path=False)
     events = build_demo_scenario()
     total_duration_s = max(e.onset_s + e.duration_s for e in events) + 5.0
 
@@ -111,6 +112,33 @@ def test_latency_stays_within_a_generous_real_time_budget():
     # regression guard, not a tuned real-time spec.
     assert summary["total_signal_to_command"]["p95_ms"] < 20.0
     assert summary["filtering"]["p95_ms"] < 5.0
+
+
+def test_demo_scenario_holds_even_with_loosest_plausible_calibration_derived_agreement_gate():
+    """Guards the "keep it rejecting coughs/bumps" requirement: the
+    detection-channel/agreement-gate loosening introduced in
+    detection/calibration.py's derive_config_overrides (to stop calibration
+    from deriving thresholds that reject its own double blinks — see
+    docs/CALIBRATION.md "Channel selection" and "second subtlety") is capped
+    at af7_af8_min_correlation=0.2 / af7_af8_max_amplitude_ratio=6.0 in the
+    worst case. Confirm that even at those loosest bounds, the full artifact
+    scenario still resolves to HOLD for everything except the two genuine
+    double blinks — the other hard gates (duration, prominence, signal
+    quality, shape) still catch what the agreement gate no longer has to.
+    """
+    config = apply_overrides(
+        load_config(override_path=False),
+        {"spatial": {"af7_af8_min_correlation": 0.2, "af7_af8_max_amplitude_ratio": 6.0}},
+    )
+    results, _ = _run_demo_scenario(config)
+
+    double_events = [
+        r for r in results if r.state_event is not None and r.state_event.event_type == BlinkEventType.DOUBLE_BLINK_CONFIRMED
+    ]
+    assert len(double_events) == 2
+
+    non_hold_commands = [r.gate_decision.command for r in results if r.gate_decision.command != Command.HOLD]
+    assert non_hold_commands == [Command.OPEN, Command.CLOSE]
 
 
 def test_pipeline_holds_when_communication_is_lost():

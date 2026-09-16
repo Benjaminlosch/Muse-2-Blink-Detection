@@ -7,7 +7,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-155 tests, all running against simulated data and hand-constructed fixtures
+159 tests, all running against simulated data and hand-constructed fixtures
 — none require physical hardware. Coverage includes:
 
 | Area | File(s) |
@@ -48,12 +48,12 @@ classification code.
 ```bash
 cd web
 npm install
-npm run test        # vitest — 27 tests
+npm run test        # vitest — 31 tests
 npm run typecheck   # tsc -b --noEmit
 npm run build         # production build, also run in CI before deploy
 ```
 
-27 vitest tests, all running in Node (no browser, no hardware required):
+31 vitest tests, all running in Node (no browser, no hardware required):
 
 | Area | File(s) |
 |---|---|
